@@ -22,33 +22,40 @@ export const MOCK_GENERATE_REPORT = {
   data: {
     next_action: 'generate_report',
     reply_text:
-      '听你讲完，我对 Dijkstra 的逻辑彻底明白了！今天的对练先到这里，我帮我们整理了一份诊断报告：',
+      '今天的对练结束，这是你的诊断报告：',
     card_preview: {
-      total_score: 8.5,
-      tagline: '逻辑整体严密，在贪心原理的本质解释上可进一步深化',
-      main_vulnerability: '贪心最优子结构解释不够直观'
+      total_score: 34,
+      summary: '对核心机制掌握扎实，表达清晰有条理'
     },
     final_report: {
-      summary:
-        '经过 3 轮交互，你准确指出了负权边限制与松弛操作核心，但在证明贪心最优选择时的逻辑略欠连贯。',
-      dimensions: {
-        understanding_depth: 9,
-        expression_completeness: 8,
-        logic_coherence: 8,
-        structure_ability: 9
-      },
-      student_tricky_points: [
-        '为什么不能用来解决带有负权边的最短路问题？',
-        '在没有负权的前提下，为什么局部最短可以推导出全局最短？'
-      ],
-      user_vulnerabilities: [
+      dimensions: [
         {
-          type: '推导表达略欠直观',
-          detail: '解释贪心策略时直接抛出了结论，缺乏对反证法的口语化通俗说明。'
+          name: '理解深度',
+          score: 9,
+          analysis: '对贪心策略的核心机制理解到位，但在证明其正确性时缺乏系统性推导',
+          suggestion: '建议通过反证法理解：假设存在更短路径会与非负权前提矛盾'
+        },
+        {
+          name: '表达完整性',
+          score: 8,
+          analysis: '覆盖了核心流程，但遗漏了非负权前提的重要性说明',
+          suggestion: '讲解时明确指出适用范围，强调负权边会破坏算法正确性'
+        },
+        {
+          name: '逻辑连贯性',
+          score: 8,
+          analysis: '步骤描述清晰，但各步骤间的逻辑衔接不够自然',
+          suggestion: '尝试用"因为...所以..."的句式串联每个操作步骤'
+        },
+        {
+          name: '结构化能力',
+          score: 9,
+          analysis: '讲解层次分明，能够分点阐述核心概念',
+          suggestion: '可以进一步使用对比方式突出算法特点与局限'
         }
       ],
-      deep_analysis:
-        'Dijkstra 算法能成功的本质在于图论中的三角不等式：在非负权图中，任意一条经过未确定节点的最短路径，其最后一段必然不短于该节点的当前最短估计。换句话说，一旦某个节点被弹出"已确定集合"，就不存在更短的路径还能"绕路"回到它，从而保证了贪心选择的全局最优性。'
+      overall_comment:
+        '整体表现优秀！你对 Dijkstra 算法的核心机制掌握扎实，表达清晰有条理。主要提升点在于贪心策略正确性的证明逻辑，建议通过反证法深入理解非负权前提的必要性。继续保持，相信下次会更出色！'
     }
   }
 }
@@ -63,7 +70,7 @@ export const MOCK_GREETING = {
   data: {
     next_action: 'follow_up',
     reply_text:
-      '同学你好！我是一个刚开始学数据结构的小白。请用费曼学习法，用大白话向我解释一下 Dijkstra 算法是怎么保证一定能找到最短路径的？',
+      '同学你好！请用大白话向我解释一下，Dijkstra 算法是怎么保证一定能找到最短路径的？',
     card_preview: null,
     final_report: null
   }

@@ -4,9 +4,9 @@ import RadarChart from './RadarChart.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
-  report: { type: Object, default: null } // final_report 完整对象
+  report: { type: Object, default: null }
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'restart'])
 
 function handleEsc(e) {
   if (e.key === 'Escape' && props.open) emit('close')
@@ -35,58 +35,48 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <Transition name="drawer">
       <div v-if="open" class="drawer-mask" @click.self="$emit('close')">
-        <div class="drawer-panel" role="dialog" aria-modal="true">
-          <header class="drawer-header">
-            <h2>费曼诊断报告</h2>
-            <button class="drawer-close" @click="$emit('close')" aria-label="关闭">
-              ×
+        <div class="diagnosis-modal" role="dialog" aria-modal="true">
+          <header class="modal-header">
+            <span class="header-title">费曼诊断报告</span>
+            <button class="close-btn" @click="$emit('close')" aria-label="关闭">
+              <svg class="close-icon" viewBox="0 0 16 16" fill="none">
+                <path d="M4 4L12 12" stroke="#6B7280" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M12 4L4 12" stroke="#6B7280" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
             </button>
           </header>
 
-          <div v-if="report" class="drawer-body">
-            <!-- 总评 -->
-            <section class="block">
-              <h3 class="block-title">📝 总评摘要</h3>
-              <p class="summary">{{ report.summary }}</p>
-            </section>
-
-            <!-- 四维雷达 -->
-            <section class="block">
-              <h3 class="block-title">🎯 四维评分雷达</h3>
-              <RadarChart :dimensions="report.dimensions" />
-            </section>
-
-            <!-- 小白刁难点 -->
-            <section class="block">
-              <h3 class="block-title">❓ 小白刁难点</h3>
-              <ul class="list">
-                <li v-for="(q, i) in report.student_tricky_points" :key="i">
-                  {{ q }}
-                </li>
-              </ul>
-            </section>
-
-            <!-- 回应漏洞 -->
-            <section class="block">
-              <h3 class="block-title">⚠️ 你的回应漏洞</h3>
-              <div
-                v-for="(v, i) in report.user_vulnerabilities"
-                :key="i"
-                class="vuln-card"
-              >
-                <div class="vuln-type">{{ v.type }}</div>
-                <div class="vuln-detail">{{ v.detail }}</div>
+          <div v-if="report" class="modal-body">
+            <div class="body-row-1">
+              <div class="radar-box">
+                <RadarChart :dimensions="report.dimensions" />
               </div>
-            </section>
+              <div class="summary-wrap">
+                <span class="sub-title-sm">综合评价</span>
+                <p class="summary-text">{{ report.overall_comment }}</p>
+              </div>
+            </div>
 
-            <!-- 深度剖析 -->
-            <section class="block">
-              <h3 class="block-title">🔬 深度原理剖析</h3>
-              <p class="analysis">{{ report.deep_analysis }}</p>
-            </section>
+            <div class="divider-line"></div>
+
+            <div class="dimensions-wrap">
+              <span class="sub-title-sm">分维度分析</span>
+              <div class="dimensions-list">
+                <div class="dimension-item" v-for="(dim, i) in report.dimensions" :key="i">
+                  <div class="dimension-header">
+                    <span class="dimension-name">{{ dim.name }}</span>
+                    <span class="dimension-score">{{ dim.score }}分</span>
+                  </div>
+                  <div class="dimension-analysis">{{ dim.analysis }}</div>
+                  <div class="dimension-suggestion">{{ dim.suggestion }}</div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div v-else class="drawer-empty">报告数据缺失</div>
+          <div v-else class="modal-body">
+            <div style="padding: 40px; text-align: center; color: #6B7280;">报告数据缺失</div>
+          </div>
         </div>
       </div>
     </Transition>
@@ -94,127 +84,182 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-/* 遮罩 */
 .drawer-mask {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(0, 0, 0, 0.5);
   z-index: 1000;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   animation: fade-in 0.2s ease;
 }
 
-/* 抽屉本体 */
-.drawer-panel {
-  width: 100%;
-  max-width: 720px;
-  max-height: 88vh;
-  background: var(--color-bg-elevated);
-  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-  box-shadow: var(--shadow-lg);
+.diagnosis-modal {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  animation: slide-up 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+  align-items: flex-start;
+  padding: 0;
+  width: 630px;
+  max-width: 630px;
+  max-height: 85vh;
+  background: #FFFFFF;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0px 25px 50px -12px rgba(0, 0, 0, 0.25);
+  border-radius: 15px;
+  flex-shrink: 0;
 }
 
-/* 桌面端居中模态框 */
-@media (min-width: 768px) {
-  .drawer-mask { align-items: center; }
-  .drawer-panel {
-    border-radius: var(--radius-xl);
-    max-height: 80vh;
-  }
+.modal-header {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 22.5px;
+  width: 100%;
+  height: 60.94px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
 }
-
-.drawer-header {
+.header-title {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 22px;
+  letter-spacing: 0.375px;
+  color: #1A1D23;
+}
+.close-btn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 18px 22px 14px;
-  border-bottom: 1px solid var(--color-border);
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9.375px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border: none;
+  background: transparent;
 }
-.drawer-header h2 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 600;
+.close-btn:hover {
+  background: rgba(0, 0, 0, 0.04);
 }
-.drawer-close {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  font-size: 22px;
-  line-height: 1;
-  color: var(--color-text-soft);
-  transition: background 0.15s;
+.close-icon {
+  width: 16px;
+  height: 16px;
 }
-.drawer-close:hover { background: var(--color-border); }
 
-.drawer-body {
-  padding: 18px 22px 24px;
-  overflow-y: auto;
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 18.75px 22.5px;
+  gap: 22.5px;
+  width: 100%;
   flex: 1;
+  overflow-y: auto;
 }
 
-.drawer-empty {
-  padding: 40px;
-  text-align: center;
-  color: var(--color-text-muted);
+.body-row-1 {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 18.75px;
+  width: 100%;
+  flex-shrink: 0;
 }
-
-/* 内容块 */
-.block { margin-bottom: 22px; }
-.block:last-child { margin-bottom: 0; }
-.block-title {
-  margin: 0 0 10px;
-  font-size: 14px;
+.radar-box {
+  width: 200px;
+  max-width: 200px;
+  height: 200px;
+  max-height: 200px;
+  flex-shrink: 0;
+}
+.summary-wrap {
+  display: flex;
+  flex-direction: column;
+  width: calc(100% - 218.75px);
+}
+.sub-title-sm {
+  font-family: 'Noto Sans SC', sans-serif;
   font-weight: 600;
-  color: var(--color-text-soft);
-  letter-spacing: 0.2px;
+  font-size: 11.25px;
+  line-height: 17px;
+  letter-spacing: 0.5625px;
+  text-transform: uppercase;
+  color: #6B7280;
 }
-.summary,
-.analysis {
-  margin: 0;
-  font-size: 14.5px;
-  line-height: 1.75;
-  color: var(--color-text);
-  white-space: pre-wrap;
+.summary-text {
+  margin-top: 7.5px;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 13.5px;
+  line-height: 22px;
+  color: #1A1D23;
+  margin-bottom: 0;
 }
 
-/* 列表 */
-.list {
-  margin: 0;
-  padding-left: 20px;
-  font-size: 14.5px;
-  line-height: 1.85;
-  color: var(--color-text);
+.divider-line {
+  width: 100%;
+  height: 1px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
 }
-.list li { margin-bottom: 4px; }
 
-/* 漏洞卡片 */
-.vuln-card {
-  background: #fff7ed;
-  border-left: 3px solid var(--color-warning);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-  margin-bottom: 10px;
+.dimensions-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
-.vuln-type {
-  font-size: 13px;
+.dimensions-list {
+  margin-top: 11.25px;
+  display: flex;
+  flex-direction: column;
+  gap: 13.5px;
+}
+.dimension-item {
+  box-sizing: border-box;
+  padding: 13.5px 15px;
+  background: #F9FAFB;
+  border-radius: 13.375px;
+}
+.dimension-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 7.5px;
+}
+.dimension-name {
+  font-family: 'Noto Sans SC', sans-serif;
   font-weight: 600;
-  color: #b45309;
-  margin-bottom: 4px;
+  font-size: 13.5px;
+  color: #1A1D23;
 }
-.vuln-detail {
-  font-size: 14px;
-  color: var(--color-text);
-  line-height: 1.65;
+.dimension-score {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: #2563EB;
+}
+.dimension-analysis {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 13.125px;
+  line-height: 20px;
+  color: #4B5563;
+  margin-bottom: 5.625px;
+}
+.dimension-suggestion {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 12.1875px;
+  line-height: 18px;
+  color: #6B7280;
+  padding-left: 11.25px;
+  border-left: 2px solid #DBEAFE;
 }
 
-/* 过渡 */
 .drawer-enter-from,
 .drawer-leave-to { opacity: 0; }
-.drawer-enter-from .drawer-panel,
-.drawer-leave-to .drawer-panel { transform: translateY(40px); }
+.drawer-enter-from .diagnosis-modal,
+.drawer-leave-to .diagnosis-modal { transform: translateY(20px); }
 </style>

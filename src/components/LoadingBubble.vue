@@ -6,6 +6,7 @@
   <div class="loading-row">
     <div class="loading-avatar">AI</div>
     <div class="loading-bubble">
+      <span class="loading-text">AI 小白正在梳理你的讲解逻辑…</span>
       <span class="dot" />
       <span class="dot" />
       <span class="dot" />
@@ -41,8 +42,12 @@
   border-top-left-radius: 4px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 8px;
   box-shadow: var(--shadow-sm);
+}
+.loading-text {
+  font-size: 14px;
+  color: var(--color-text-soft);
 }
 .dot {
   display: inline-block;
@@ -54,4 +59,5 @@
 }
 .dot:nth-child(2) { animation-delay: 0.15s; }
 .dot:nth-child(3) { animation-delay: 0.30s; }
+.dot:nth-child(4) { animation-delay: 0.45s; }
 </style>

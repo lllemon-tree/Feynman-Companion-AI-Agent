@@ -59,11 +59,7 @@ function openDrawer() {
   <div class="chat-view">
     <!-- 顶部 Header -->
     <header class="chat-header">
-      <div class="logo">📚</div>
-      <div class="title">
-        <div class="title-main">费曼伴学 · 智能体</div>
-        <div class="title-sub">Dijkstra 路径规划 · 费曼讲练</div>
-      </div>
+      <h1 class="chat-title">费曼伴学智能体 — 数据结构专练</h1>
     </header>
 
     <!-- 消息区 -->
@@ -100,59 +96,51 @@ function openDrawer() {
       :open="drawerOpen"
       :report="store.reportData?.finalReport"
       @close="drawerOpen = false"
+      @restart="handleRestart"
     />
   </div>
 </template>
 
 <style scoped>
 .chat-view {
-  height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg);
+  width: 100%;
+  height: 100%;
+  background: #F5F7FA;
+  position: relative;
 }
 
 /* Header */
 .chat-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 14px 20px;
-  background: var(--color-bg-elevated);
-  border-bottom: 1px solid var(--color-border);
-  box-shadow: var(--shadow-sm);
-  z-index: 5;
-}
-.logo {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  background: var(--color-accent-soft);
-  display: flex;
-  align-items: center;
   justify-content: center;
-  font-size: 18px;
+  padding: 0 15px;
+  width: 100%;
+  height: 52.5px;
+  background: #FFFFFF;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  flex-shrink: 0;
 }
-.title-main {
-  font-size: 15px;
+.chat-title {
+  margin: 0;
   font-weight: 600;
-  color: var(--color-text);
-}
-.title-sub {
-  font-size: 12px;
-  color: var(--color-text-muted);
-  margin-top: 2px;
+  font-size: 14.0625px;
+  line-height: 21px;
+  letter-spacing: 0.351562px;
+  color: #1A1D23;
 }
 
 /* 消息主区 */
 .chat-main {
   flex: 1;
+  padding: 22.5px 15px;
   overflow-y: auto;
-  padding: 8px 16px 0;
 }
 .chat-main__inner {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 12px 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 18.75px;
 }
 </style>
