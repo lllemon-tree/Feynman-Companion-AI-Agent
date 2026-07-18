@@ -3,3 +3,6 @@ uvicorn[standard]>=0.27,<1.0
 httpx>=0.26,<1.0
 pydantic>=2.6,<3.0
 pytest>=8.0,<9.0
+sqlmodel>=0.0.16,<0.1.0
+python-multipart>=0.0.9,<0.1.0
+pymupdf>=1.23,<2.0
