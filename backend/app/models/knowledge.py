@@ -94,12 +94,23 @@ class KP(SQLModel, table=True):
 # 注意：為了避免與 sqlmodel 的 Session 衝突，類別命名為 LearnSession
 # ---------------------------------------------------------
 class LearnSession(SQLModel, table=True):
-    __tablename__ = "session" # 在資料庫中的實體表名依然是 session
+    # 使用新表名保留早期 demo 的 session 表，避免启动时做破坏性迁移。
+    __tablename__ = "learn_session"
 
-    id: str = Field(primary_key=True)      # 例如 "sess-xxx"
-    kp_id: str                             # 關聯的知識點 (Knowledge Point) ID
-    status: str = Field(default="ongoing") # 狀態：ongoing(進行中), completed(已完成), failed(失敗)
-    current_turn: int = Field(default=0)   # 記錄當前是第幾輪追問 (依 PRD，最多 3 輪)
+    id: str = Field(primary_key=True)
+    user_id: str = Field(foreign_key="user.id", index=True)
+    kp_id: Optional[str] = Field(default=None, index=True)
+    kp_name: Optional[str] = None
+    material_id: Optional[str] = None
+    chapter_id: Optional[str] = None
+    status: str = Field(default="ongoing")
+    current_turn: int = Field(default=0)
+    invalid_answer_count: int = Field(default=0)
+    off_topic_count: int = Field(default=0)
+    last_provider: str = Field(default="none")
+    fallback_used: bool = Field(default=False)
+    messages_json: str = Field(default="[]")
+    final_response_json: Optional[str] = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

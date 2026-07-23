@@ -1,6 +1,7 @@
 # Feynman Companion Backend
 
-FastAPI backend for the Feynman companion demo. The week-4 conversation runtime is implemented as a LangGraph workflow and binds each session to a knowledge point.
+FastAPI backend for the Feynman companion demo. The conversation runtime uses
+LangGraph, JWT authentication, and SQLite-backed session persistence.
 
 Runtime requirement: Python 3.13.
 
@@ -30,6 +31,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 LLM_PROVIDER=deepseek
 REQUEST_TIMEOUT_SECONDS=30
+AUTH_SECRET_KEY=replace_with_a_long_random_secret
+AUTH_TOKEN_EXPIRE_MINUTES=1440
 ```
 
 Use mock mode without a model call:
@@ -41,6 +44,9 @@ LLM_PROVIDER=mock
 ## API
 
 - `GET /health`
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/auth/current`
 - `POST /api/v1/material/upload`
 - `GET /api/v1/material/{material_id}/status`
 - `POST /api/v1/material/{material_id}/retry`
@@ -50,6 +56,8 @@ LLM_PROVIDER=mock
 - `POST /api/v1/feynman/chat`
 - `POST /api/v1/feynman/reset`
 - `GET /api/v1/feynman/session/{session_id}`
+- `GET /api/v1/feynman/sessions`
+- `GET /api/v1/feynman/sessions/{session_id}`
 
 Request:
 
@@ -63,13 +71,24 @@ Request:
 
 `kp-demo` and `kp-demo2` are temporary mock knowledge points. Omitting `kp_id` falls back to `kp-demo` for week-3 compatibility. A session cannot switch knowledge points after the conversation starts; call `/reset` first.
 
+Missing `Authorization` means guest mode. A valid login token can be sent as
+`Authorization: Bearer <token>`. Invalid and expired tokens return HTTP 401.
+Persisted sessions are bound to the resolved user and cannot be read by another
+user.
+
 The runtime graph is:
 
 ```text
 START -> load_context -> route_input
-route_input -> kp_missing | off_topic | ineffective | evaluate | report
+route_input -> kp_missing | off_topic | ineffective
+route_input -> retrieve -> evaluate | report
 all branches -> persist_session -> END
 ```
+
+`retrieve` merges the knowledge point's fixed-page chunks with up to three
+single-material RAG chunks. Until the Chroma implementation is connected, the
+default retriever returns no RAG chunks and the fixed-page context remains the
+fallback.
 
 See `docs/backend-api.md` for frontend integration details.
 

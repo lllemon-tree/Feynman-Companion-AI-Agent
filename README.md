@@ -40,6 +40,8 @@ DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_MODEL=deepseek-chat
 LLM_PROVIDER=deepseek
 REQUEST_TIMEOUT_SECONDS=30
+AUTH_SECRET_KEY=replace_with_a_long_random_secret
+AUTH_TOKEN_EXPIRE_MINUTES=1440
 ```
 
 ### 2. Start Frontend
@@ -92,7 +94,9 @@ npm run build
 1. 用户上传有目录的文字版 PDF，前端轮询教材解析状态。
 2. 后端完成章节切片、知识点抽取和四维 rubric 生成并写入 SQLite。
 3. 用户按科目、教材、章节、知识点选择真实知识点。
-4. 前端请求动态 greeting，并将 `session_id`、`kp_id` 和讲解内容发送给 LangGraph。
-5. 后端最多追问 3 轮，随后返回四维诊断报告；DeepSeek 失败时降级 Mock。
+4. 游客直接使用，登录用户通过 Bearer Token 绑定自己的持久化会话。
+5. 前端请求动态 greeting，并将 `session_id`、`kp_id` 和讲解内容发送给 LangGraph。
+6. LangGraph 检索当前教材相关切片，并与知识点固定页码原文一起注入评判 Prompt。
+7. 后端最多追问 3 轮，随后返回四维诊断报告；DeepSeek 失败时降级 Mock。
 
 详细接口见 `docs/backend-api.md`。

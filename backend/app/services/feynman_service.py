@@ -2,28 +2,37 @@ from functools import lru_cache
 from typing import Optional
 
 from backend.app.core.config import get_settings
+from backend.app.core.database import engine
 from backend.app.graphs.feynman_graph import FeynmanGraph
+from backend.app.models.auth import GUEST_USER_ID
 from backend.app.models.feynman import (
     FeynmanChatData,
     FeynmanChatRequest,
     GreetingData,
     ResetSessionData,
     ResetSessionRequest,
+    SessionDetailData,
     SessionDebugData,
+    SessionSummaryData,
 )
 from backend.app.services.deepseek_client import DeepSeekClient
 from backend.app.services.kp_provider import DEFAULT_KP_ID, KnowledgePointProvider, kp_provider
 from backend.app.services.mock_llm import MockLLMClient
-from backend.app.services.session_store import InMemorySessionStore, session_store
+from backend.app.services.rag_retriever import RAGRetriever, get_rag_retriever
+from backend.app.services.session_store import (
+    SQLSessionStore,
+    SessionStore,
+)
 
 
 class FeynmanService:
     def __init__(
         self,
-        store: InMemorySessionStore,
+        store: SessionStore,
         llm_client,
         fallback_client=None,
         knowledge_point_provider: Optional[KnowledgePointProvider] = None,
+        rag_retriever: Optional[RAGRetriever] = None,
     ) -> None:
         self._store = store
         self._llm_client = llm_client
@@ -37,16 +46,23 @@ class FeynmanService:
             kp_provider=self._kp_provider,
             max_follow_ups=self._settings.max_follow_ups,
             primary_provider_name=primary_provider_name,
+            rag_retriever=rag_retriever or get_rag_retriever(),
         )
 
-    async def chat(self, request: FeynmanChatRequest) -> FeynmanChatData:
+    async def chat(
+        self,
+        request: FeynmanChatRequest,
+        user_id: str = GUEST_USER_ID,
+    ) -> FeynmanChatData:
         if not request.user_input.strip():
             raise ValueError("user_input cannot be empty")
 
-        session = self._store.get_or_create(request.session_id)
+        session = self._store.get_or_create(request.session_id, user_id)
         if session.ended and session.final_response is not None:
             return session.final_response
-        return await self._graph.run(request=request, session=session)
+        response = await self._graph.run(request=request, session=session)
+        self._store.save(session)
+        return response
 
     def greeting(self, kp_id: Optional[str] = None) -> GreetingData:
         knowledge_point = self._kp_provider.get(kp_id or DEFAULT_KP_ID)
@@ -61,12 +77,20 @@ class FeynmanService:
             kp_name=knowledge_point.name,
         )
 
-    def reset(self, request: ResetSessionRequest) -> ResetSessionData:
-        self._store.reset(request.session_id)
+    def reset(
+        self,
+        request: ResetSessionRequest,
+        user_id: str = GUEST_USER_ID,
+    ) -> ResetSessionData:
+        self._store.reset(request.session_id, user_id)
         return ResetSessionData(session_id=request.session_id, reset=True)
 
-    def inspect_session(self, session_id: str) -> SessionDebugData:
-        session = self._store.get(session_id)
+    def inspect_session(
+        self,
+        session_id: str,
+        user_id: str = GUEST_USER_ID,
+    ) -> SessionDebugData:
+        session = self._store.get(session_id, user_id)
         if session is None:
             return SessionDebugData(session_id=session_id, exists=False)
 
@@ -87,6 +111,40 @@ class FeynmanService:
             recent_messages=session.messages[-6:],
         )
 
+    def get_session_detail(
+        self,
+        session_id: str,
+        user_id: str = GUEST_USER_ID,
+    ) -> Optional[SessionDetailData]:
+        session = self._store.get(session_id, user_id)
+        if session is None:
+            return None
+        return SessionDetailData(
+            session_id=session.session_id,
+            kp_id=session.kp_id,
+            kp_name=session.kp_name,
+            material_id=session.material_id,
+            chapter_id=session.chapter_id,
+            chat_history=session.messages,
+            report_data=session.final_response,
+            created_at=session.created_at.isoformat(),
+            updated_at=session.updated_at.isoformat(),
+        )
+
+    def list_sessions(
+        self,
+        user_id: str = GUEST_USER_ID,
+    ) -> list[SessionSummaryData]:
+        return [
+            SessionSummaryData(
+                session_id=item.session_id,
+                kp_name=item.kp_name,
+                material_title=item.material_title,
+                created_at=item.created_at.isoformat(),
+            )
+            for item in self._store.list_by_user(user_id)
+        ]
+
     def draw_graph_mermaid(self) -> str:
         return self._graph.draw_mermaid()
 
@@ -98,4 +156,8 @@ def get_feynman_service() -> FeynmanService:
         llm_client = DeepSeekClient(settings)
     else:
         llm_client = MockLLMClient()
-    return FeynmanService(store=session_store, llm_client=llm_client, fallback_client=MockLLMClient())
+    return FeynmanService(
+        store=SQLSessionStore(engine),
+        llm_client=llm_client,
+        fallback_client=MockLLMClient(),
+    )

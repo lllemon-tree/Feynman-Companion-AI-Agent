@@ -99,3 +99,34 @@ class SessionDebugResponse(BaseModel):
     code: int
     msg: str
     data: SessionDebugData
+
+
+class SessionDetailData(BaseModel):
+    session_id: str
+    kp_id: Optional[str] = None
+    kp_name: Optional[str] = None
+    material_id: Optional[str] = None
+    chapter_id: Optional[str] = None
+    chat_history: List[ChatMessage] = Field(default_factory=list)
+    report_data: Optional[FeynmanChatData] = None
+    created_at: str
+    updated_at: str
+
+
+class SessionDetailResponse(BaseModel):
+    code: int
+    msg: str
+    data: SessionDetailData
+
+
+class SessionSummaryData(BaseModel):
+    session_id: str
+    kp_name: Optional[str] = None
+    material_title: str
+    created_at: str
+
+
+class SessionListResponse(BaseModel):
+    code: int
+    msg: str
+    data: List[SessionSummaryData] = Field(default_factory=list)

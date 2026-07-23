@@ -208,6 +208,7 @@ class FeynmanServiceTest(unittest.IsolatedAsyncioTestCase):
             "kp_missing",
             "off_topic",
             "ineffective",
+            "retrieve",
             "evaluate",
             "report",
             "persist_session",

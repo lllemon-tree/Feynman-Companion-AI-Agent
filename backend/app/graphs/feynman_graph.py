@@ -5,12 +5,14 @@ from typing_extensions import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from backend.app.models.feynman import FeynmanChatData, FeynmanChatRequest, NextAction
+from backend.app.models.rag import RetrievedChunk
 from backend.app.services.kp_provider import (
     DEFAULT_KP_ID,
     KnowledgePoint,
     KnowledgePointProvider,
 )
 from backend.app.services.session_store import SessionState
+from backend.app.services.rag_retriever import RAGRetriever
 
 
 RouteName = Literal["kp_missing", "off_topic", "ineffective", "evaluate", "report"]
@@ -24,6 +26,7 @@ class FeynmanGraphState(TypedDict, total=False):
     response: FeynmanChatData
     provider: str
     fallback_used: bool
+    grounding_chunks: list[RetrievedChunk]
 
 
 class FeynmanGraph:
@@ -34,12 +37,14 @@ class FeynmanGraph:
         kp_provider: KnowledgePointProvider,
         max_follow_ups: int,
         primary_provider_name: str,
+        rag_retriever: RAGRetriever,
     ) -> None:
         self._llm_client = llm_client
         self._fallback_client = fallback_client
         self._kp_provider = kp_provider
         self._max_follow_ups = max_follow_ups
         self._primary_provider_name = primary_provider_name
+        self._rag_retriever = rag_retriever
         self._graph = self._build_graph()
 
     async def run(
@@ -60,6 +65,7 @@ class FeynmanGraph:
         builder.add_node("kp_missing", self._handle_kp_missing)
         builder.add_node("off_topic", self._handle_off_topic)
         builder.add_node("ineffective", self._handle_ineffective)
+        builder.add_node("retrieve", self._retrieve)
         builder.add_node("evaluate", self._evaluate)
         builder.add_node("report", self._report)
         builder.add_node("persist_session", self._persist_session)
@@ -73,6 +79,14 @@ class FeynmanGraph:
                 "kp_missing": "kp_missing",
                 "off_topic": "off_topic",
                 "ineffective": "ineffective",
+                "evaluate": "retrieve",
+                "report": "retrieve",
+            },
+        )
+        builder.add_conditional_edges(
+            "retrieve",
+            self._select_route,
+            {
                 "evaluate": "evaluate",
                 "report": "report",
             },
@@ -170,6 +184,37 @@ class FeynmanGraph:
             "fallback_used": False,
         }
 
+    async def _retrieve(self, state: FeynmanGraphState) -> FeynmanGraphState:
+        request = state["request"]
+        knowledge_point = state["knowledge_point"]
+        assert knowledge_point is not None
+
+        rag_chunks: list[RetrievedChunk] = []
+        try:
+            raw_chunks = await self._rag_retriever.retrieve(
+                query=request.user_input.strip(),
+                material_id=knowledge_point.material_id,
+                top_k=3,
+            )
+            rag_chunks = [
+                chunk
+                if isinstance(chunk, RetrievedChunk)
+                else RetrievedChunk.model_validate(chunk)
+                for chunk in raw_chunks
+            ]
+        except Exception:
+            # 向量库未就绪或检索失败时，固定页码原文仍可支撑评判。
+            rag_chunks = []
+
+        merged: list[RetrievedChunk] = []
+        seen_ids: set[str] = set()
+        for chunk in [*knowledge_point.source_chunks, *rag_chunks]:
+            if chunk.chunk_id in seen_ids:
+                continue
+            seen_ids.add(chunk.chunk_id)
+            merged.append(chunk)
+        return {"grounding_chunks": merged}
+
     async def _evaluate(self, state: FeynmanGraphState) -> FeynmanGraphState:
         session = state["session"]
         request = state["request"]
@@ -182,6 +227,7 @@ class FeynmanGraph:
                 follow_up_count=session.follow_up_count,
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
+                grounding_chunks=state.get("grounding_chunks", []),
             )
             response = _normalize_contract(response)
             return {
@@ -196,6 +242,7 @@ class FeynmanGraph:
                 follow_up_count=session.follow_up_count,
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
+                grounding_chunks=state.get("grounding_chunks", []),
             )
             response = _normalize_contract(response)
             return {"response": response, "provider": "mock", "fallback_used": True}
@@ -212,6 +259,7 @@ class FeynmanGraph:
                 follow_up_count=self._max_follow_ups,
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
+                grounding_chunks=state.get("grounding_chunks", []),
             )
             response = _normalize_contract(response)
             return {
@@ -226,6 +274,7 @@ class FeynmanGraph:
                 follow_up_count=self._max_follow_ups,
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
+                grounding_chunks=state.get("grounding_chunks", []),
             )
             response = _normalize_contract(response)
             return {"response": response, "provider": "mock", "fallback_used": True}

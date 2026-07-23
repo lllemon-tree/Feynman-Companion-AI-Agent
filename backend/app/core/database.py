@@ -1,10 +1,12 @@
 # database.py
 from sqlalchemy import inspect, text
-from sqlmodel import SQLModel, create_engine, Session
+from sqlmodel import SQLModel, Session, create_engine
+
+from backend.app.core.config import PROJECT_ROOT
 
 # 1. 定义数据库文件的位置。
 # 这里的 "sqlite:///feynman.db" 表示在当前运行目录下创建一个名为 feynman.db 的 SQLite 数据库文件。
-SQLITE_URL = "sqlite:///feynman.db"
+SQLITE_URL = f"sqlite:///{PROJECT_ROOT / 'feynman.db'}"
 
 # 2. 创建引擎 (Engine)。
 # Engine 是负责和数据库对话的底层核心。
@@ -18,7 +20,9 @@ def create_db_and_tables():
     当程序启动时调用此函数，SQLModel 会检查 models 中定义的所有 table=True 的类，
     并在 feynman.db 中自动执行 CREATE TABLE 语句。
     """
-    from backend.app.models.knowledge import Material, Chunk, Chapter, KP, LearnSession
+    from backend.app.models.auth import GUEST_USER_ID, User, utc_now
+    from backend.app.models.knowledge import Chapter, Chunk, KP, LearnSession, Material
+
     SQLModel.metadata.create_all(engine)
     with engine.begin() as connection:
         columns = {column["name"] for column in inspect(connection).get_columns("material")}
@@ -27,6 +31,17 @@ def create_db_and_tables():
         connection.execute(
             text("UPDATE material SET name = filename WHERE name IS NULL OR name = ''")
         )
+    with Session(engine) as session:
+        if session.get(User, GUEST_USER_ID) is None:
+            session.add(
+                User(
+                    id=GUEST_USER_ID,
+                    username=GUEST_USER_ID,
+                    password_hash="!",
+                    created_at=utc_now(),
+                )
+            )
+            session.commit()
 
 def get_session():
     """
