@@ -205,19 +205,30 @@ class FeynmanGraph:
         request = state["request"]
         knowledge_point = state["knowledge_point"]
         assert knowledge_point is not None
-        response = await self._fallback_client.evaluate(
-            messages=session.messages,
-            user_input=request.user_input.strip(),
-            follow_up_count=self._max_follow_ups,
-            max_follow_ups=self._max_follow_ups,
-            knowledge_point=knowledge_point,
-        )
-        response = _normalize_contract(response)
-        return {
-            "response": response,
-            "provider": "mock",
-            "fallback_used": self._primary_provider_name != "mock",
-        }
+        try:
+            response = await self._llm_client.evaluate(
+                messages=session.messages,
+                user_input=request.user_input.strip(),
+                follow_up_count=self._max_follow_ups,
+                max_follow_ups=self._max_follow_ups,
+                knowledge_point=knowledge_point,
+            )
+            response = _normalize_contract(response)
+            return {
+                "response": response,
+                "provider": self._primary_provider_name,
+                "fallback_used": False,
+            }
+        except Exception:
+            response = await self._fallback_client.evaluate(
+                messages=session.messages,
+                user_input=request.user_input.strip(),
+                follow_up_count=self._max_follow_ups,
+                max_follow_ups=self._max_follow_ups,
+                knowledge_point=knowledge_point,
+            )
+            response = _normalize_contract(response)
+            return {"response": response, "provider": "mock", "fallback_used": True}
 
     @staticmethod
     def _persist_session(state: FeynmanGraphState) -> FeynmanGraphState:

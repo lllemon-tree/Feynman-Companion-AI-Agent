@@ -89,10 +89,10 @@ npm run build
 
 ## Demo Flow
 
-1. 前端根据用户选择的知识点请求 `GET /api/v1/feynman/greeting?kp_id=...`。
-2. 用户输入讲解后，前端将 `session_id`、`kp_id` 和 `user_input` 发给 `POST /api/v1/feynman/chat`。
-3. 后端通过 LangGraph 围绕当前知识点进行追问，最多 3 轮正式追问。
-4. 达到报告条件后，后端返回 `generate_report`，前端展示诊断报告。
-5. 用户点击重新开始时，前端请求 `POST /api/v1/feynman/reset`。
+1. 用户上传有目录的文字版 PDF，前端轮询教材解析状态。
+2. 后端完成章节切片、知识点抽取和四维 rubric 生成并写入 SQLite。
+3. 用户按科目、教材、章节、知识点选择真实知识点。
+4. 前端请求动态 greeting，并将 `session_id`、`kp_id` 和讲解内容发送给 LangGraph。
+5. 后端最多追问 3 轮，随后返回四维诊断报告；DeepSeek 失败时降级 Mock。
 
 详细接口见 `docs/backend-api.md`。

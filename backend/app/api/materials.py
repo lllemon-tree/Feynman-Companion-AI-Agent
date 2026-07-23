@@ -1,37 +1,37 @@
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, UploadFile, Form, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlmodel import Session
-from backend.app.core.database import get_session
+
 from backend.app.core.config import get_settings
-from backend.app.models.knowledge import MaterialUploadResponse, MaterialUploadData
-from backend.app.services.pdf_service import save_and_process_pdf
-# 导入我们在 models 里定义好的 Pydantic 数据外壳，用于规范输出格式
+from backend.app.core.database import get_session
 from backend.app.models.knowledge import (
-    MaterialStatusResponse,
-    MaterialStatusData,
-    MaterialTreeResponse,
-    MaterialTreeData,
-    SubjectListResponse,
     ChapterItem,
     KnowledgePointItem,
+    MaterialStatusData,
+    MaterialStatusResponse,
+    MaterialTreeData,
+    MaterialTreeResponse,
+    MaterialUploadData,
     MaterialUploadResponse,
-    MaterialUploadData
+    SubjectListResponse,
 )
+from backend.app.services.material_service import (
+    get_material_status_from_db,
+    get_material_tree_from_db,
+    get_subjects_from_db,
+    prepare_material_retry,
+)
+from backend.app.services.pdf_service import save_and_process_pdf
 from backend.app.services.workflow_service import run_full_extraction_workflow
-from backend.app.services.material_service import get_material_status_from_db, get_material_tree_from_db, get_subjects_from_db
 
 # 1. 初始化路由器 (设立服务员)
 # prefix="/material": 这个文件里所有接口的 URL 都会自动加上这个前缀
 # tags=["Material"]: 仅用于在 FastAPI 自动生成的 Swagger 接口文档中进行分组展示，方便调试
 router = APIRouter(prefix="/material", tags=["Material"])
 
-# =====================================================================
-# 接口 0：查询科目列表
-# 完整 URL: GET /api/v1/material/subjects
-# =====================================================================
+
 @router.get("/subjects", response_model=SubjectListResponse)
 async def get_subjects(session: Session = Depends(get_session)):
-    """从数据库查询所有已存在的科目列表（去重）。"""
     subjects = get_subjects_from_db(session)
     return SubjectListResponse(code=200, msg="success", data=subjects)
 
@@ -86,6 +86,9 @@ async def get_material_tree(subject: str = "计算机", session: Session = Depen
                 MaterialTreeData(
                     material_id="mat-demo",
                     title="数据结构教材",
+                    status="done",
+                    step="完成",
+                    progress=1.0,
                     chapters=[
                         ChapterItem(
                             chapter_id="ch-demo",
@@ -94,7 +97,10 @@ async def get_material_tree(subject: str = "计算机", session: Session = Depen
                                 KnowledgePointItem(
                                     kp_id="kp-demo",
                                     name="Dijkstra 算法",
-                                    summary="非负权图求单源最短路径的贪心算法"
+                                    summary="非负权图求单源最短路径的贪心算法",
+                                    page_start=30,
+                                    page_end=33,
+                                    status="done",
                                 )
                             ]
                         )
@@ -111,12 +117,15 @@ async def get_material_tree(subject: str = "计算机", session: Session = Depen
 # =====================================================================
 @router.post("/upload", response_model=MaterialUploadResponse)
 async def upload_material(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     subject: str = Form(...),
     name: str = Form(""),
-    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
-    """接收前端上传的教材和名称，自动解析并存入数据库。"""
+    """
+    接收前端上传的教材，自动实现切片存入数据库。
+    调用大模型进行知识点抽取和 Rubric 生成。
+    """
     if get_settings().material_mock:
         return MaterialUploadResponse(
             code=200,
@@ -125,14 +134,24 @@ async def upload_material(
         )
 
     # 1. 读取文件
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
     try:
         content = await file.read()
     except Exception:
         raise HTTPException(status_code=400, detail="文件读取失败")
 
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF 文件不能超过 50MB")
+
     # 2. 调用 Service 层解析
     try:
-        generated_id = save_and_process_pdf(content, subject, name) 
+        generated_id = save_and_process_pdf(
+            content,
+            subject,
+            filename=file.filename,
+            name=name,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -146,4 +165,19 @@ async def upload_material(
         code=200,
         msg="success",
         data=MaterialUploadData(material_id=generated_id, status="parsing")
+    )
+
+
+@router.post("/{material_id}/retry", response_model=MaterialUploadResponse)
+async def retry_material(
+    material_id: str,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
+    material = prepare_material_retry(session, material_id)
+    background_tasks.add_task(run_full_extraction_workflow, material_id)
+    return MaterialUploadResponse(
+        code=200,
+        msg="success",
+        data=MaterialUploadData(material_id=material.id, status=material.status),
     )

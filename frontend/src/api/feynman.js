@@ -53,25 +53,20 @@ http.interceptors.request.use(
 http.interceptors.response.use(
   (resp) => resp.data,
   (err) => {
-    // 非mock模式下，后端返回的错误可能包含code和msg字段
     const responseData = err?.response?.data
-    let message = err?.message || '网络异常，请稍后重试'
-    
-    if (responseData) {
-      if (responseData.msg) {
-        message = responseData.msg
-      } else if (responseData.error) {
-        message = responseData.error
-      }
-    }
-    
-    // 401未授权：token过期或非法，清空token并跳转登录页
+    const message =
+      responseData?.detail ||
+      responseData?.msg ||
+      responseData?.error ||
+      err?.message ||
+      '网络异常，请稍后重试'
+
     if (err?.response?.status === 401) {
       localStorage.removeItem('feynman_token')
       localStorage.removeItem('feynman_user')
       window.location.href = '/login'
     }
-    
+
     const error = new Error(message)
     if (err?.response?.status) {
       error.status = err.response.status
@@ -89,7 +84,7 @@ export async function chatWithAgent(sessionId, userInput, kpId) {
     kp_id: kpId,
     user_input: userInput
   })
-  return data
+  return data?.data
 }
 
 export async function fetchGreeting(kpId = null) {
@@ -102,7 +97,7 @@ export async function fetchGreeting(kpId = null) {
   }
   const params = kpId ? { kp_id: kpId } : {}
   const data = await http.get('/feynman/greeting', { params })
-  return data
+  return data?.data
 }
 
 export async function resetFeynmanSession(sessionId) {
@@ -113,7 +108,7 @@ export async function resetFeynmanSession(sessionId) {
   const data = await http.post('/feynman/reset', {
     session_id: sessionId
   })
-  return data
+  return data?.data
 }
 
 export async function uploadMaterial(file, subject, name, onProgress) {
@@ -139,7 +134,7 @@ export async function uploadMaterial(file, subject, name, onProgress) {
       }
     }
   })
-  return data
+  return data?.data
 }
 
 export async function getMaterialStatus(materialId) {
@@ -190,7 +185,12 @@ export async function getMaterialStatus(materialId) {
     return MOCK_MATERIAL_STATUS_DONE.data
   }
   const data = await http.get(`/material/${materialId}/status`)
-  return data
+  return data?.data
+}
+
+export async function retryMaterial(materialId) {
+  const data = await http.post(`/material/${materialId}/retry`)
+  return data?.data
 }
 
 export async function getKnowledgeTree(subject) {
@@ -199,7 +199,7 @@ export async function getKnowledgeTree(subject) {
     return MOCK_KNOWLEDGE_TREE.data
   }
   const data = await http.get('/material/tree', { params: { subject } })
-  return data
+  return data?.data
 }
 
 export async function fetchSubjects() {
@@ -208,7 +208,7 @@ export async function fetchSubjects() {
     return ['计算机', '数学', '政治']
   }
   const data = await http.get('/material/subjects')
-  return data
+  return data?.data
 }
 
 export async function getKpDetail(kpId) {
@@ -217,7 +217,7 @@ export async function getKpDetail(kpId) {
     return MOCK_KP_DETAIL.data
   }
   const data = await http.get(`/kp/${kpId}`)
-  return data
+  return data?.data
 }
 
 export async function createKp(chapterId, name, pageStart, pageEnd) {
@@ -232,7 +232,7 @@ export async function createKp(chapterId, name, pageStart, pageEnd) {
     page_end: pageEnd,
     summary: ''
   })
-  return data
+  return data?.data
 }
 
 export async function updateKp(kpId, updates) {
@@ -244,7 +244,7 @@ export async function updateKp(kpId, updates) {
     return { kp_id: kpId, regenerate_triggered: false, status: 'done' }
   }
   const data = await http.patch(`/kp/${kpId}`, updates)
-  return data
+  return data?.data
 }
 
 export async function deleteKp(kpId) {
@@ -253,7 +253,7 @@ export async function deleteKp(kpId) {
     return MOCK_KP_DELETE.data
   }
   const data = await http.delete(`/kp/${kpId}`)
-  return data
+  return data?.data
 }
 
 export async function regenerateKp(kpId) {
@@ -262,7 +262,7 @@ export async function regenerateKp(kpId) {
     return MOCK_KP_REGENERATE.data
   }
   const data = await http.post(`/kp/${kpId}/regenerate`)
-  return data
+  return data?.data
 }
 
 const mockCallCount = new Map()
@@ -310,7 +310,7 @@ export async function login(username, password) {
     return Promise.reject(error)
   }
   const data = await http.post('/auth/login', { username, password })
-  return data
+  return data?.data
 }
 
 /**
@@ -333,7 +333,7 @@ export async function register(username, password) {
     return { user_id: userId }
   }
   const data = await http.post('/auth/register', { username, password })
-  return data
+  return data?.data
 }
 
 /**
@@ -358,7 +358,7 @@ export async function getCurrentUser() {
     return Promise.reject(error)
   }
   const data = await http.get('/auth/current')
-  return data
+  return data?.data
 }
 
 // RAG向量检索模块API
@@ -377,7 +377,7 @@ export async function retrieveMaterialChunks(materialId, query, topK = 3) {
   const data = await http.get(`/material/${materialId}/retrieve`, {
     params: { query, top_k: topK }
   })
-  return data
+  return data?.data
 }
 
 /**
@@ -390,7 +390,7 @@ export async function rebuildMaterialEmbedding(materialId) {
     return { material_id: materialId }
   }
   const data = await http.post(`/material/${materialId}/embedding/rebuild`)
-  return data
+  return data?.data
 }
 
 // 会话持久化模块API
@@ -404,7 +404,7 @@ export async function getSessionList() {
     return MOCK_SESSIONS.data
   }
   const data = await http.get('/feynman/sessions')
-  return data
+  return data?.data
 }
 
 /**
@@ -424,7 +424,7 @@ export async function getSessionDetail(sessionId) {
     }
   }
   const data = await http.get(`/feynman/sessions/${sessionId}`)
-  return data
+  return data?.data
 }
 
 function delay(ms) {

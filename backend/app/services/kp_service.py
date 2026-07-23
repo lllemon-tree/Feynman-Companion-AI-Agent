@@ -4,6 +4,7 @@
 import json
 # uuid 用于生成绝对不重复的随机字符串，作为数据库的主键 ID
 import uuid
+from datetime import datetime, timezone
 # 从 sqlmodel 导入 Session（数据库连接通道）和 select（用于写查询语句）
 from sqlmodel import Session, select
 # 当查不到数据时，直接用 HTTPException 砸一个报错给前端（比如 404）
@@ -23,6 +24,7 @@ from backend.app.models.knowledge import (
     KPUpdateRequest, KPUpdateData,
     KPDeleteData
 )
+from backend.app.services.kp_provider import normalize_rubric
 
 def get_kp_detail_from_db(session: Session, kp_id: str) -> KPDetailData:
     """
@@ -52,7 +54,10 @@ def get_kp_detail_from_db(session: Session, kp_id: str) -> KPDetailData:
     # 执行上面写好的查询语句，把满足条件的所有切片拿出来
     chunks = session.exec(chunk_stmt).all()
     # 遍历拿出来的切片，塞进规定的 KPSourceChunk 格式里，准备发给前端
-    source_chunks = [KPSourceChunk(page=c.page_no, text=c.text) for c in chunks]
+    source_chunks = [
+        KPSourceChunk(chunk_id=c.id, page=c.page_no, text=c.text)
+        for c in chunks
+    ]
 
     # 4. 反序列化 Rubric
     # 数据库里存的是长得像 JSON 的普通字符串，我们需要把它变回 Python 的字典
@@ -71,13 +76,18 @@ def get_kp_detail_from_db(session: Session, kp_id: str) -> KPDetailData:
         name=kp.name,
         # 如果 summary 是空的，就给个默认提示，防止前端展示出 null
         summary=kp.summary or "暂无摘要",
-        # **parsed_rubric 是解包操作，把字典里的字段塞进 KPRubric 对象里
-        rubric=KPRubric(**parsed_rubric), 
+        page_start=kp.page_start,
+        page_end=kp.page_end,
+        status=kp.status,
+        rubric=KPRubric(**normalize_rubric(parsed_rubric)),
         source_chunks=source_chunks
     )
 
 def create_kp_in_db(session: Session, request: KPCreateRequest) -> KPCreateData:
     """手动在数据库插入一个新的知识点"""
+    if session.get(Chapter, request.chapter_id) is None:
+        raise HTTPException(status_code=404, detail="所属章节不存在")
+
     # 生成一个随机 ID，比如 kp-a1b2c3d4
     new_id = f"kp-{uuid.uuid4().hex[:8]}"
     
@@ -112,6 +122,11 @@ def update_kp_in_db(session: Session, kp_id: str, request: KPUpdateRequest) -> K
     # 设定一个开关，用来记录用户到底有没有修改起止页码
     regenerate_triggered = False
     
+    next_page_start = update_data.get("page_start", kp.page_start)
+    next_page_end = update_data.get("page_end", kp.page_end)
+    if next_page_end < next_page_start:
+        raise HTTPException(status_code=400, detail="结束页码不能小于起始页码")
+
     # 遍历前端传来的每一个要改的字段
     for key, value in update_data.items():
         # setattr 把新值覆盖到 kp 对象对应的字段上
@@ -124,6 +139,7 @@ def update_kp_in_db(session: Session, kp_id: str, request: KPUpdateRequest) -> K
     # 按照 PRD：如果页码变了，说明原文变了，必须让大模型重写 Rubric
     if regenerate_triggered:
         kp.status = "pending_regenerate"
+    kp.updated_at = datetime.now(timezone.utc)
         
     session.add(kp)
     session.commit()

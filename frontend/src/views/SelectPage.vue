@@ -8,8 +8,13 @@ import UserBar from '@/components/UserBar.vue'
 const router = useRouter()
 const chatStore = useChatStore()
 
-const subjects = ref([])
-const selectedSubject = ref('')
+const DEFAULT_SUBJECTS = [
+  { value: '计算机', label: '计算机' },
+  { value: '数学', label: '数学' },
+  { value: '政治', label: '政治' }
+]
+const subjects = ref(DEFAULT_SUBJECTS)
+const selectedSubject = ref('计算机')
 const knowledgeTree = ref([])
 const selectedMaterialId = ref('')
 const selectedChapterId = ref('')
@@ -19,7 +24,7 @@ const loading = ref(false)
 
 const dropdownOpen = ref({})
 
-const materials = computed(() => knowledgeTree.value || [])
+const materials = computed(() => (knowledgeTree.value || []).filter(m => m.status === 'done'))
 const chapters = computed(() => {
   const material = materials.value.find(m => m.material_id === selectedMaterialId.value)
   return material?.chapters || []
@@ -141,8 +146,9 @@ async function startFeynman() {
   const kp = selectedKp.value
   const material = materials.value.find(m => m.material_id === selectedMaterialId.value)
   const chapter = chapters.value.find(c => c.chapter_id === selectedChapterId.value)
+  const subjectLabel = subjects.find(s => s.value === selectedSubject.value)?.label || ''
 
-  chatStore.setSubject(selectedSubject.value)
+  chatStore.setSubject(subjectLabel)
   chatStore.setMaterial(selectedMaterialId.value, material?.title || '')
   chatStore.setChapter(selectedChapterId.value, chapter?.title || '')
   chatStore.setKnowledgePoint(kp.kp_id, kp.name)
@@ -173,11 +179,13 @@ const toastMessage = ref('')
 const showToast = ref(false)
 
 onMounted(async () => {
-  subjects.value = await fetchSubjects()
-  if (subjects.value.length === 0) {
-    subjects.value = ['计算机', '数学', '政治']
+  try {
+    const storedSubjects = await fetchSubjects()
+    const values = [...new Set([...DEFAULT_SUBJECTS.map(item => item.value), ...storedSubjects])]
+    subjects.value = values.map(value => ({ value, label: value }))
+  } catch (e) {
+    console.warn('加载科目列表失败，使用默认科目:', e)
   }
-  selectedSubject.value = subjects.value[0]
   loadKnowledgeTree()
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.dropdown-wrapper')) {
@@ -223,7 +231,7 @@ onMounted(async () => {
                   <rect x="3" y="14" width="7" height="7" rx="1" />
                   <rect x="14" y="14" width="7" height="7" rx="1" />
                 </svg>
-                <span>{{ selectedSubject || '请选择科目' }}</span>
+                <span>{{ subjects.find(s => s.value === selectedSubject)?.label }}</span>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ 'rotate-180': dropdownOpen['subject'] }">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
@@ -231,12 +239,12 @@ onMounted(async () => {
               <div v-if="dropdownOpen['subject']" class="dropdown-menu">
                 <button
                   v-for="s in subjects"
-                  :key="s"
+                  :key="s.value"
                   class="dropdown-item"
-                  :class="{ 'dropdown-item--selected': s === selectedSubject }"
-                  @click="handleSubjectChange(s); closeDropdown('subject')"
+                  :class="{ 'dropdown-item--selected': s.value === selectedSubject }"
+                  @click="handleSubjectChange(s.value); closeDropdown('subject')"
                 >
-                  {{ s }}
+                  {{ s.label }}
                 </button>
               </div>
             </div>

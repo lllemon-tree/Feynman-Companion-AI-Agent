@@ -45,8 +45,14 @@ onMounted(async () => {
   scrollToBottom(false)
 })
 
-function handleSend(text) {
-  store.sendUserMessage(text)
+async function handleSend(text) {
+  const response = await store.sendUserMessage(text)
+  if (
+    response?.next_action === 'guide_topic' &&
+    response?.reply_text?.includes('重新选择知识点')
+  ) {
+    setTimeout(() => router.push('/select'), 800)
+  }
 }
 
 async function handleRestart() {

@@ -76,6 +76,7 @@ export const useChatStore = defineStore('chat', {
       try {
         const data = await chatWithAgent(this.sessionId, content, this.kpId)
         this.handleAgentResponse(data)
+        return data
       } catch (e) {
         this.pushMessage(
           'system',
@@ -83,6 +84,7 @@ export const useChatStore = defineStore('chat', {
         )
         this.isLocked = false
         this.errorMsg = e.message || '请求失败'
+        return null
       }
     },
 

@@ -105,7 +105,7 @@ class SQLiteKnowledgePointProvider:
                     kp_id=kp.id,
                     name=kp.name,
                     summary=kp.summary or "暂无摘要",
-                    rubric=_normalize_rubric(rubric),
+                    rubric=normalize_rubric(rubric),
                     material_id=chapter.material_id,
                     chapter_id=chapter.id,
                 )
@@ -127,7 +127,7 @@ class FallbackKnowledgePointProvider:
         return self._primary.get(kp_id) or self._fallback.get(kp_id)
 
 
-def _normalize_rubric(rubric: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_rubric(rubric: Dict[str, Any]) -> Dict[str, Any]:
     labels = {
         "concept_prerequisite": "概念前提",
         "core_mechanism": "核心机制",

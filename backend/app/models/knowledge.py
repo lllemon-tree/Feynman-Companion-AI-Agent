@@ -1,10 +1,9 @@
 # knowledge.py
-from typing import Optional
 from datetime import datetime, timezone
+from typing import Any, List, Optional
+
+from pydantic import BaseModel, model_validator
 from sqlmodel import Field, SQLModel
-# 用于定义数据库模型和 Pydantic 模型的基类
-from pydantic import BaseModel
-from typing import List, Optional
 
 # 辅助函数：生成当前的 UTC 时间，用作创建和更新时间的默认值
 def utc_now():
@@ -19,7 +18,7 @@ class Material(SQLModel, table=True):
     # 主键，类似 "mat-xxx"。因为是我们自己生成的字符串，所以不使用自增。
     id: str = Field(primary_key=True)
     subject: str                  # 科目：计算机/政治/数学等
-    name: str                     # 教材名称，用户上传时填写
+    name: Optional[str] = None     # 用户填写的教材展示名称
     filename: str                 # 原始文件名
     raw_path: str                 # 本地存储路径
     
@@ -126,7 +125,7 @@ class MaterialStatusResponse(BaseModel):
 
 # ------------------------------------------
 
-# 3. 科目列表接口
+# 1.2 科目列表接口
 class SubjectListResponse(BaseModel):
     code: int = 200
     msg: str = "success"
@@ -139,7 +138,9 @@ class KnowledgePointItem(BaseModel):
     kp_id: str
     name: str
     summary: str
-    status: str = "pending_regenerate"
+    page_start: int
+    page_end: int
+    status: str
     tag: Optional[str] = None # 预留给 "高频考点" 等标签
 
 class ChapterItem(BaseModel):
@@ -150,6 +151,10 @@ class ChapterItem(BaseModel):
 class MaterialTreeData(BaseModel):
     material_id: str
     title: str
+    status: str
+    step: Optional[str] = None
+    progress: float = 0.0
+    error: Optional[str] = None
     chapters: List[ChapterItem]
 
 
@@ -180,21 +185,30 @@ class MaterialUploadResponse(BaseModel):
 # 场景：前端点击某个知识点，想要看大模型生成的详细解析和引用的原文
 # ---------------------------------------------------------
 
+class RubricDimension(BaseModel):
+    name: str
+    content: Any
+
+
 class KPRubric(BaseModel):
-    """
-    大模型生成的四维解析数据 (Rubric)。
-    为了防止大模型还没生成完前端就报错，我们统一给默认值 {} (空字典)。
-    一旦生成完毕，这里面就会塞满诸如 {"核心公式": "E=mc^2"} 这样的真实数据。
-    """
-    concept_prerequisite: str = "暂无说明" # 前置说明
-    core_mechanism: str = "暂无说明" # 核心机制
-    principle_proof: str = "暂无说明" # 原理证明
-    common_misunderstandings: List[str] = [] # 常见误区列表
+    concept_prerequisite: RubricDimension = Field(
+        default_factory=lambda: RubricDimension(name="概念前提", content="暂无说明")
+    )
+    core_mechanism: RubricDimension = Field(
+        default_factory=lambda: RubricDimension(name="核心机制", content="暂无说明")
+    )
+    principle_proof: RubricDimension = Field(
+        default_factory=lambda: RubricDimension(name="原理证明", content="暂无说明")
+    )
+    common_misunderstandings: RubricDimension = Field(
+        default_factory=lambda: RubricDimension(name="常见误区", content=[])
+    )
 
 class KPSourceChunk(BaseModel):
     """
     大模型生成解析时，参考的 PDF 原文切片 (用于文本溯源 Grounding)。
     """
+    chunk_id: str
     page: int   # 原文在第几页
     text: str   # 原文的具体文字内容
 
@@ -203,6 +217,9 @@ class KPDetailData(BaseModel):
     kp_id: str
     name: str                            # 知识点名称
     summary: str                         # 一句话摘要
+    page_start: int
+    page_end: int
+    status: str
     rubric: KPRubric                     # 嵌套上面的四维解析
     source_chunks: List[KPSourceChunk]   # 嵌套上面的原文切片列表
 
@@ -246,9 +263,15 @@ class KPCreateRequest(BaseModel):
     """
     chapter_id: str                      # 挂载在哪个章节下
     name: str                            # 用户起的知识点名字
-    page_start: int                      # 起始页码
-    page_end: int                        # 结束页码
+    page_start: int = Field(ge=1)        # 起始页码
+    page_end: int = Field(ge=1)          # 结束页码
     summary: Optional[str] = ""          # 摘要，允许前端不传，不传默认为空字符串
+
+    @model_validator(mode="after")
+    def validate_page_range(self):
+        if self.page_end < self.page_start:
+            raise ValueError("page_end must be greater than or equal to page_start")
+        return self
 
 class KPCreateData(BaseModel):
     """新增成功后，后端返回给前端的核心数据"""
@@ -274,8 +297,9 @@ class KPUpdateRequest(BaseModel):
     比如只改名字，就只传 name，页码不传。
     """
     name: Optional[str] = None
-    page_start: Optional[int] = None
-    page_end: Optional[int] = None
+    summary: Optional[str] = None
+    page_start: Optional[int] = Field(default=None, ge=1)
+    page_end: Optional[int] = Field(default=None, ge=1)
 
 class KPUpdateData(BaseModel):
     kp_id: str

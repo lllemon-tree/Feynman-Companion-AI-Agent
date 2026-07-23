@@ -1,4 +1,5 @@
 # database.py
+from sqlalchemy import inspect, text
 from sqlmodel import SQLModel, create_engine, Session
 
 # 1. 定义数据库文件的位置。
@@ -8,8 +9,8 @@ SQLITE_URL = "sqlite:///feynman.db"
 # 2. 创建引擎 (Engine)。
 # Engine 是负责和数据库对话的底层核心。
 # connect_args={"check_same_thread": False} 是 SQLite 在 FastAPI (异步框架) 中常加的参数，避免多线程报错。
-# echo=True 会在终端打印出底层执行的 SQL 语句，方便开发时排错，上线时可以改为 False。
-engine = create_engine(SQLITE_URL, echo=True, connect_args={"check_same_thread": False})
+# SQL 调试日志默认关闭，避免大模型调用时被大量查询日志淹没。
+engine = create_engine(SQLITE_URL, echo=False, connect_args={"check_same_thread": False})
 
 def create_db_and_tables():
     """
@@ -19,6 +20,13 @@ def create_db_and_tables():
     """
     from backend.app.models.knowledge import Material, Chunk, Chapter, KP, LearnSession
     SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("material")}
+        if "name" not in columns:
+            connection.execute(text("ALTER TABLE material ADD COLUMN name VARCHAR"))
+        connection.execute(
+            text("UPDATE material SET name = filename WHERE name IS NULL OR name = ''")
+        )
 
 def get_session():
     """

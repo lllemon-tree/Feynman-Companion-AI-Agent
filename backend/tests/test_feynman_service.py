@@ -14,6 +14,16 @@ class FailingLLMClient:
         raise RuntimeError("simulated provider failure")
 
 
+class RecordingLLMClient:
+    def __init__(self):
+        self.calls = 0
+        self._delegate = MockLLMClient()
+
+    async def evaluate(self, **kwargs):
+        self.calls += 1
+        return await self._delegate.evaluate(**kwargs)
+
+
 class FeynmanServiceTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.service = FeynmanService(
@@ -203,6 +213,27 @@ class FeynmanServiceTest(unittest.IsolatedAsyncioTestCase):
             "persist_session",
         ]:
             self.assertIn(node_name, graph)
+
+    async def test_forced_report_uses_primary_client_before_fallback(self):
+        primary = RecordingLLMClient()
+        service = FeynmanService(
+            store=InMemorySessionStore(),
+            llm_client=primary,
+            fallback_client=MockLLMClient(),
+        )
+        session_id = "primary-report"
+        for answer in [
+            "Dijkstra 用于求最短路径",
+            "它选择当前距离最小的未访问节点",
+            "然后松弛相邻边",
+            "非负权保证已确定距离不会再变短",
+        ]:
+            response = await service.chat(
+                FeynmanChatRequest(session_id=session_id, user_input=answer)
+            )
+
+        self.assertEqual(response.next_action, NextAction.GENERATE_REPORT)
+        self.assertEqual(primary.calls, 4)
 
 
 class FeynmanApiTest(unittest.TestCase):

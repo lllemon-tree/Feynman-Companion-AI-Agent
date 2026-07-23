@@ -21,7 +21,8 @@ class MockLLMClient:
         knowledge_point: KnowledgePoint,
     ) -> FeynmanChatData:
         text = _normalize(user_input)
-        all_text = _normalize(" ".join([message.content for message in messages] + [user_input]))
+        user_messages = [message.content for message in messages if message.role == "user"]
+        all_text = _normalize(" ".join(user_messages + [user_input]))
 
         if knowledge_point.kp_id != "kp-demo":
             return _evaluate_generic(

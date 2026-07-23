@@ -1,14 +1,20 @@
-import uuid
-import asyncio
 import json
+import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
+
 from sqlmodel import Session, select
 
 from backend.app.core.database import engine
 from backend.app.core.config import get_settings
+from backend.app.models.knowledge import Chapter, Chunk, KP, RubricSchema
 from backend.app.services.deepseek_client import DeepSeekClient
-from backend.app.models.knowledge import Chunk, KP, Chapter
 
-async def extract_kps_for_material(material_id: str) -> int:
+
+async def extract_kps_for_material(
+    material_id: str,
+    progress_callback: Callable[[int, int], None] | None = None,
+) -> int:
     """
     教材解析管线：知识点抽取环节。
     读取教材切片，调用大模型提取知识点，并存入数据库。
@@ -32,8 +38,20 @@ async def extract_kps_for_material(material_id: str) -> int:
 
         print(f"开始为教材 {material_id} 抽取知识点，共需处理 {len(chunks)} 个切片。")
 
+        existing_statement = (
+            select(KP)
+            .join(Chapter, KP.chapter_id == Chapter.id)
+            .where(Chapter.material_id == material_id)
+        )
+        existing_kps = session.exec(existing_statement).all()
+        kp_by_name = {
+            (kp.chapter_id, kp.name.strip().lower()): kp
+            for kp in existing_kps
+        }
+
         # 2. 遍历切片，逐个调用大模型进行抽取
         # MVP 阶段采用最稳妥的 for 循环串行调用，避免大批量并发触发 DeepSeek 的并发限流
+        total_chunks = len(chunks)
         for idx, chunk in enumerate(chunks):
             try:
                 # 打印进度提示
@@ -44,14 +62,21 @@ async def extract_kps_for_material(material_id: str) -> int:
                     chunk_text=chunk.text,
                     page_no=chunk.page_no
                 )
-                # ！！！添加这行调试代码！！！
-                print(f"DEBUG: 模型返回数据: {response}")
-
                 if not response.knowledge_points:
                     print(f"警告：第 {chunk.page_no} 页未提取到任何知识点。")
                 
                 # 3. 将 Pydantic 对象转换为 SQLModel 对象并落库
                 for kp_data in response.knowledge_points:
+                    if chunk.chapter_id is None:
+                        continue
+                    key = (chunk.chapter_id, kp_data.name.strip().lower())
+                    existing_kp = kp_by_name.get(key)
+                    if existing_kp is not None:
+                        existing_kp.page_start = min(existing_kp.page_start, kp_data.page_no)
+                        existing_kp.page_end = max(existing_kp.page_end, kp_data.page_no)
+                        session.add(existing_kp)
+                        continue
+
                     new_kp = KP(
                         id=f"kp-{uuid.uuid4().hex[:8]}",
                         chapter_id=chunk.chapter_id, # [核心变化] 直接复用切片自带的章节 ID
@@ -62,15 +87,16 @@ async def extract_kps_for_material(material_id: str) -> int:
                         status="pending_regenerate"  # 初始状态，等待后续的四维 Rubric 生成
                     )
                     session.add(new_kp)
+                    kp_by_name[key] = new_kp
                     total_kps_extracted += 1
-                
-                # 增加非常短暂的休眠，防止请求过于密集
-                await asyncio.sleep(0.5)
                     
             except Exception as e:
                 # 捕获异常，保证某个切片失败时，后续切片能继续处理
                 print(f"切片 {chunk.id} (页码 {chunk.page_no}) 提取失败: {str(e)}")
                 continue
+            finally:
+                if progress_callback is not None:
+                    progress_callback(idx + 1, total_chunks)
         
         # 4. 批量提交所有新产生的知识点到 feynman.db
         session.commit()
@@ -80,27 +106,39 @@ async def extract_kps_for_material(material_id: str) -> int:
 
 # 修改为接收 session 作为参数
 async def generate_rubric_for_kp(kp: KP, session: Session) -> bool:
-    # 1. 直接使用传入的 session 查找数据，不要再新建 Session(engine)
-    stmt = select(Chunk).where(
-        Chunk.material_id == session.get(Chapter, kp.chapter_id).material_id,
-        Chunk.page_no >= kp.page_start,
-        Chunk.page_no <= kp.page_end
-    )
-    chunks = session.exec(stmt).all()
-    full_text = "\n".join([c.text for c in chunks])
-
-    client = DeepSeekClient(get_settings())
     try:
+        chapter = session.get(Chapter, kp.chapter_id)
+        if chapter is None:
+            raise ValueError("知识点找不到所属章节")
+
+        stmt = (
+            select(Chunk)
+            .where(
+                Chunk.material_id == chapter.material_id,
+                Chunk.page_no >= kp.page_start,
+                Chunk.page_no <= kp.page_end,
+            )
+            .order_by(Chunk.page_no, Chunk.seq)
+        )
+        chunks = session.exec(stmt).all()
+        if not chunks:
+            raise ValueError("知识点页码范围内没有可用的教材原文")
+
+        full_text = "\n".join(chunk.text for chunk in chunks)
+        client = DeepSeekClient(get_settings())
         rubric_json = await client.generate_rubric(full_text, kp.name)
-        
-        # 2. 直接更新对象
-        kp.rubric = json.dumps(rubric_json, ensure_ascii=False)
+        validated_rubric = RubricSchema.model_validate(rubric_json)
+
+        kp.rubric = json.dumps(validated_rubric.model_dump(), ensure_ascii=False)
         kp.status = "done"
-        
-        # 3. 这里不需要 commit，让外层调用者统一 commit，或者根据需要提交
+        kp.updated_at = datetime.now(timezone.utc)
         session.add(kp)
-        session.commit() # 确保在这里保存
+        session.commit()
         return True
     except Exception as e:
         print(f"Rubric 生成失败: {e}")
+        kp.status = "failed"
+        kp.updated_at = datetime.now(timezone.utc)
+        session.add(kp)
+        session.commit()
         return False

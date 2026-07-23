@@ -16,6 +16,7 @@ __pycache__/
 
 *.log
 feynman.db
+uploads/
 
 # Local secrets
 .env

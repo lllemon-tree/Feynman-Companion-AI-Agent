@@ -41,6 +41,11 @@ LLM_PROVIDER=mock
 ## API
 
 - `GET /health`
+- `POST /api/v1/material/upload`
+- `GET /api/v1/material/{material_id}/status`
+- `POST /api/v1/material/{material_id}/retry`
+- `GET /api/v1/material/tree?subject=计算机`
+- `GET/POST/PATCH/DELETE /api/v1/kp/...`
 - `GET /api/v1/feynman/greeting?kp_id=kp-demo`
 - `POST /api/v1/feynman/chat`
 - `POST /api/v1/feynman/reset`
@@ -74,4 +79,12 @@ See `docs/backend-api.md` for frontend integration details.
 cd /Users/chen/Code/Feynman-Companion-AI-Agent
 source .venv/bin/activate
 python -m pytest -q backend/tests
+```
+
+Run the real week-4 smoke after configuring DeepSeek. It creates a small local
+PDF record in `feynman.db` and `uploads/`, then verifies extraction, rubric
+generation, dynamic greeting, and the first LangGraph turn:
+
+```bash
+python -m backend.scripts.week4_e2e_smoke
 ```

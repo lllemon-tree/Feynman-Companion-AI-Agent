@@ -18,7 +18,7 @@ function handleLogin() {
 function handleLogout() {
   authStore.logout()
   dropdownOpen.value = false
-  router.push('/login')
+  router.push('/upload')
 }
 
 function toggleDropdown() {
