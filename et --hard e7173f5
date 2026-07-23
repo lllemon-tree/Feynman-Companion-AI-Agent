@@ -1,0 +1,41 @@
+[33m1e7e871[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/feat/dynamic-material-parsing[m[33m, [m[1;32mfeat/rag-retriever[m[33m, [m[1;32mfeat/dynamic-material-parsing[m[33m)[m HEAD@{0}: reset: moving to HEAD^
+[33me7173f5[m[33m ([m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{1}: commit: feat: 实现第五周 RAG 语义检索模块
+[33m1e7e871[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/feat/dynamic-material-parsing[m[33m, [m[1;32mfeat/rag-retriever[m[33m, [m[1;32mfeat/dynamic-material-parsing[m[33m)[m HEAD@{2}: checkout: moving from feat/rag-retriever to main
+[33m1e7e871[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/feat/dynamic-material-parsing[m[33m, [m[1;32mfeat/rag-retriever[m[33m, [m[1;32mfeat/dynamic-material-parsing[m[33m)[m HEAD@{3}: checkout: moving from main to feat/rag-retriever
+[33m1e7e871[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/feat/dynamic-material-parsing[m[33m, [m[1;32mfeat/rag-retriever[m[33m, [m[1;32mfeat/dynamic-material-parsing[m[33m)[m HEAD@{4}: merge feat/dynamic-material-parsing: Fast-forward
+[33m39af34c[m[33m ([m[1;31mupstream/main[m[33m, [m[1;31mupstream/HEAD[m[33m)[m HEAD@{5}: checkout: moving from feat/dynamic-material-parsing to main
+[33m1e7e871[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/feat/dynamic-material-parsing[m[33m, [m[1;32mfeat/rag-retriever[m[33m, [m[1;32mfeat/dynamic-material-parsing[m[33m)[m HEAD@{6}: commit: feat: 完成第四周 PRD 全功能
+[33m39af34c[m[33m ([m[1;31mupstream/main[m[33m, [m[1;31mupstream/HEAD[m[33m)[m HEAD@{7}: pull upstream main: Fast-forward
+[33m84a0a32[m HEAD@{8}: checkout: moving from main to feat/dynamic-material-parsing
+[33m39af34c[m[33m ([m[1;31mupstream/main[m[33m, [m[1;31mupstream/HEAD[m[33m)[m HEAD@{9}: merge upstream/main: Fast-forward
+[33mc5ed3c8[m HEAD@{10}: commit: 补充pdf_service.py
+[33m34b45eb[m HEAD@{11}: merge upstream/main: Fast-forward
+[33m3d6df7a[m HEAD@{12}: checkout: moving from main to main
+[33m3d6df7a[m HEAD@{13}: merge feat/dynamic-material-parsing: Merge made by the 'ort' strategy.
+[33m8ad8cd6[m HEAD@{14}: merge upstream/main: Fast-forward
+[33mee38348[m HEAD@{15}: checkout: moving from feat/dynamic-material-parsing to main
+[33m84a0a32[m HEAD@{16}: commit: feat:上传教材并切片、识别知识点、生成四维Rubric
+[33mee38348[m HEAD@{17}: checkout: moving from main to feat/dynamic-material-parsing
+[33mee38348[m HEAD@{18}: checkout: moving from feat/Material-Parsing to main
+[33mee38348[m HEAD@{19}: checkout: moving from main to feat/Material-Parsing
+[33mee38348[m HEAD@{20}: checkout: moving from dev to main
+[33m7d9972e[m HEAD@{21}: checkout: moving from main to dev
+[33mee38348[m HEAD@{22}: merge upstream/main: Fast-forward
+[33ma877042[m HEAD@{23}: checkout: moving from main to main
+[33ma877042[m HEAD@{24}: commit: 第四周prd与目前项目介绍
+[33m2844ec9[m HEAD@{25}: checkout: moving from dev to main
+[33m7d9972e[m HEAD@{26}: checkout: moving from main to dev
+[33m2844ec9[m HEAD@{27}: merge upstream/main: Fast-forward
+[33m7d9972e[m HEAD@{28}: checkout: moving from dev to main
+[33m7d9972e[m HEAD@{29}: checkout: moving from 7d9972eb048b241082315c60830d16f4a78e7557 to dev
+[33m7d9972e[m HEAD@{30}: checkout: moving from main to deb
+[33m7d9972e[m HEAD@{31}: checkout: moving from deb to main
+[33m7d9972e[m HEAD@{32}: checkout: moving from main to deb
+[33m7d9972e[m HEAD@{33}: checkout: moving from main to main
+[33m7d9972e[m HEAD@{34}: commit: mvp产品需求文档
+[33mc7c5b9d[m HEAD@{35}: pull upstream main: Fast-forward
+[33mf7599f4[m HEAD@{36}: commit (amend): docs: 第二周整合文档
+[33m462c493[m HEAD@{37}: commit: 第二周整合文档
+[33m7779c88[m HEAD@{38}: pull upstream main: Fast-forward
+[33m8615922[m HEAD@{39}: commit: docs: 主功能交互流程
+[33md2d222e[m HEAD@{40}: clone: from https://github.com/zhiduoming/Feynman-Companion-AI-Agent.git
