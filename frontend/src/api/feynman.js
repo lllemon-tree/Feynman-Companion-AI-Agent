@@ -34,7 +34,10 @@ http.interceptors.response.use(
   (resp) => resp.data,
   (err) => {
     const message =
-      err?.response?.data?.msg || err?.message || '网络异常，请稍后重试'
+      err?.response?.data?.detail ||
+      err?.response?.data?.msg ||
+      err?.message ||
+      '网络异常，请稍后重试'
     return Promise.reject(new Error(message))
   }
 )
@@ -149,6 +152,11 @@ export async function getMaterialStatus(materialId) {
     return MOCK_MATERIAL_STATUS_DONE.data
   }
   const data = await http.get(`/material/${materialId}/status`)
+  return data?.data
+}
+
+export async function retryMaterial(materialId) {
+  const data = await http.post(`/material/${materialId}/retry`)
   return data?.data
 }
 

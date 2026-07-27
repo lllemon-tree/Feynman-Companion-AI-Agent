@@ -1,102 +1,112 @@
-
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Query, UploadFile, Form, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlmodel import Session
-from backend.app.core.database import get_session
+
+from backend.app.api.dependencies import get_current_actor
 from backend.app.core.config import get_settings
-from backend.app.models.knowledge import MaterialUploadResponse, MaterialUploadData
-from backend.app.services.pdf_service import save_and_process_pdf
-# 导入我们在 models 里定义好的 Pydantic 数据外壳，用于规范输出格式
+from backend.app.core.database import get_session
+from backend.app.models.auth import CurrentActor, GUEST_USER_ID
 from backend.app.models.knowledge import (
-    MaterialStatusResponse,
-    MaterialStatusData,
-    MaterialTreeResponse,
-    MaterialTreeData,
-    SubjectListResponse,
     ChapterItem,
     KnowledgePointItem,
+    MaterialStatusData,
+    MaterialStatusResponse,
+    MaterialTreeData,
+    MaterialTreeResponse,
+    MaterialUploadData,
     MaterialUploadResponse,
-    MaterialUploadData
+    SubjectListResponse,
 )
+from backend.app.services.material_service import (
+    get_material_status_from_db,
+    get_material_tree_from_db,
+    get_subjects_from_db,
+    prepare_material_retry,
+)
+from backend.app.services.pdf_service import save_and_process_pdf
 from backend.app.services.workflow_service import run_full_extraction_workflow
-from backend.app.services.material_service import get_material_status_from_db, get_material_tree_from_db, get_subjects_from_db
 from backend.app.services.vector_store import vector_store
 from backend.app.services.rag_service import build_material_embeddings
 
-# 1. 初始化路由器 (设立服务员)
-# prefix="/material": 这个文件里所有接口的 URL 都会自动加上这个前缀
-# tags=["Material"]: 仅用于在 FastAPI 自动生成的 Swagger 接口文档中进行分组展示，方便调试
+# 1.  ()
+# prefix="/material":  URL 
+# tags=["Material"]:  FastAPI  Swagger 
 router = APIRouter(prefix="/material", tags=["Material"])
 
-# =====================================================================
-# 接口 0：查询科目列表
-# 完整 URL: GET /api/v1/material/subjects
-# =====================================================================
+
 @router.get("/subjects", response_model=SubjectListResponse)
-async def get_subjects(session: Session = Depends(get_session)):
-    """从数据库查询所有已存在的科目列表（去重）。"""
-    subjects = get_subjects_from_db(session)
+async def get_subjects(
+    actor: CurrentActor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    subjects = get_subjects_from_db(session, user_id=actor.user_id)
     return SubjectListResponse(code=200, msg="success", data=subjects)
 
 # =====================================================================
-# 接口 1：查询教材解析状态
-# 完整 URL: GET /api/v1/material/{material_id}/status
+#  1
+#  URL: GET /api/v1/material/{material_id}/status
 # =====================================================================
 @router.get("/{material_id}/status", response_model=MaterialStatusResponse)
-async def get_material_status(material_id: str, session: Session = Depends(get_session)):
-    """
-    根据给定的 material_id，查询当前教材的解析进度。
-    （三引号内的这段文字，会自动显示在生成的接口文档中作为接口说明）
-    """
+async def get_material_status(
+    material_id: str,
+    actor: CurrentActor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
     if get_settings().material_mock:
-        # 直接使用 Pydantic 实例化对象并返回，FastAPI 会自动将其转换为 JSON 发给前端
-        # 我们把前端传进来的 material_id 原样塞回给前端，让假数据更逼真
+        #  Pydantic FastAPI  JSON 
+        #  material_id 
         return MaterialStatusResponse(
             code=200,
             msg="success",
             data=MaterialStatusData(
                 material_id=material_id, 
-                status="done",           # PRD 枚举值：parsing/chunking/extracting/generating/done/failed
-                step="完成",             # 当前进度的中文描述
-                progress=1.0,            # 0.0 到 1.0 之间的浮点数进度
-                error=None               # 如果失败了，这里填错误信息
+                status="done",           # PRD parsing/chunking/extracting/generating/done/failed
+                step="",             # 
+                progress=1.0,            # 0.0  1.0 
+                error=None               # 
             )
         )
 
-    # 调用 Service 层拿真实数据
-    status_data = get_material_status_from_db(session, material_id)
+    #  Service 
+    status_data = get_material_status_from_db(session, material_id, user_id=actor.user_id)
     return MaterialStatusResponse(code=200, msg="success", data=status_data)
 
 
 # =====================================================================
-# 接口 2：查询知识点树 (四级级联：科目 -> 教材 -> 章节 -> 知识点)
-# 完整 URL: GET /api/v1/material/tree?subject=计算机
+#  2 ( ->  ->  -> )
+#  URL: GET /api/v1/material/tree?subject=
 # =====================================================================
 @router.get("/tree", response_model=MaterialTreeResponse)
-async def get_material_tree(subject: str = "计算机", session: Session = Depends(get_session)):
-    """
-    根据科目名称，查询该科目下所有已解析完成的教材，及其
-    对应的章节和知识点结构。
-    如果不传 subject，默认查询"计算机"科目。
-    """
+async def get_material_tree(
+    subject: str = "computer",
+    actor: CurrentActor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """Get material tree filtered by subject and current user."""
     if get_settings().material_mock:
-        # 这里的结构看起来很深，是因为 PRD 要求的级联选择器需要这种“树状”数据
-        # 一层一层向内嵌套实例化：Tree -> Chapter -> KnowledgePoint
+        #  PRD 
+        # Tree -> Chapter -> KnowledgePoint
         return MaterialTreeResponse(
             code=200,
             msg="success",
             data=[
                 MaterialTreeData(
                     material_id="mat-demo",
-                    title="数据结构教材",
+                    title="",
+                    status="done",
+                    step="",
+                    progress=1.0,
                     chapters=[
                         ChapterItem(
                             chapter_id="ch-demo",
-                            title="图论",
+                            title="",
                             knowledge_points=[
                                 KnowledgePointItem(
                                     kp_id="kp-demo",
-                                    name="Dijkstra 算法",
-                                    summary="非负权图求单源最短路径的贪心算法"
+                                    name="Dijkstra ",
+                                    summary="",
+                                    page_start=30,
+                                    page_end=33,
+                                    status="done",
                                 )
                             ]
                         )
@@ -104,21 +114,21 @@ async def get_material_tree(subject: str = "计算机", session: Session = Depen
                 )
             ]
         )
-    # 调用 Service 层组装树状结构
-    tree_data = get_material_tree_from_db(session, subject)
+    #  Service 
+    tree_data = get_material_tree_from_db(session, subject, user_id=actor.user_id)
     return MaterialTreeResponse(code=200, msg="success", data=tree_data)
 # =====================================================================
-# 接口 3：上传教材 PDF
-# 完整 URL: POST /api/v1/material/upload
+#  3 PDF
+#  URL: POST /api/v1/material/upload
 # =====================================================================
 @router.post("/upload", response_model=MaterialUploadResponse)
 async def upload_material(
+    background_tasks: BackgroundTasks,
+    actor: CurrentActor = Depends(get_current_actor),
     file: UploadFile = File(...),
     subject: str = Form(...),
     name: str = Form(""),
-    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
-    """接收前端上传的教材和名称，自动解析并存入数据库。"""
     if get_settings().material_mock:
         return MaterialUploadResponse(
             code=200,
@@ -126,54 +136,112 @@ async def upload_material(
             data=MaterialUploadData(material_id="mat-demo-upload", status="parsing")
         )
 
-    # 1. 读取文件
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail=" PDF ")
     try:
         content = await file.read()
     except Exception:
-        raise HTTPException(status_code=400, detail="文件读取失败")
+        raise HTTPException(status_code=400, detail="")
 
-    # 2. 调用 Service 层解析
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="PDF  50MB")
+
     try:
-        generated_id = save_and_process_pdf(content, subject, name) 
+        generated_id = save_and_process_pdf(
+            content,
+            subject,
+            filename=file.filename,
+            name=name,
+            user_id=actor.user_id,
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"内部解析失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f": {str(e)}")
 
-    # 3. 加入后台任务 (无需 try-except，因为 add_task 本身是同步操作，不会报错)
+    # 3.  ( try-except add_task )
     background_tasks.add_task(run_full_extraction_workflow, generated_id)
    
-    # 4. 返回响应
+    # 4. 
     return MaterialUploadResponse(
         code=200,
         msg="success",
         data=MaterialUploadData(material_id=generated_id, status="parsing")
     )
 # =====================================================================
-# 接口 4：检索教材内容
-# 完整 URL: GET /api/v1/material/{material_id}/retrieve
+#  4
+#  URL: GET /api/v1/material/{material_id}/retrieve
 # =====================================================================
 @router.get("/{material_id}/retrieve")
 def retrieve_chunks(
     material_id: str,
-    query: str = Query(..., description="用户输入的讲解文本或需要检索的问题"),
-    top_k: int = Query(3, description="期望召回的相似 Chunk 数量")
+    query: str = Query(..., description=""),
+    top_k: int = Query(3, description=" Chunk "),
+    actor: CurrentActor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
 ):
-    """
-    RAG 检索接口：根据文本召回 Top-K 相似度最高的 Chunk
-    """
+    """RAG  Top-K  Chunk"""
+    # 
+    status_data = get_material_status_from_db(session, material_id, user_id=actor.user_id)
     results = vector_store.search(material_id=material_id, query=query, top_k=top_k)
     return {"code": 200, "status": "success", "data": results}
 
 
 @router.post("/{material_id}/embedding/rebuild")
 def rebuild_material_embedding(
-    material_id: str, 
+    material_id: str,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_session)
+    actor: CurrentActor = Depends(get_current_actor),
+    db: Session = Depends(get_session),
 ):
-    """
-    存量数据重建接口：手动触发某本教材的向量化任务
-    """
+    """"""
+    # 
+    get_material_status_from_db(db, material_id, user_id=actor.user_id)
     background_tasks.add_task(build_material_embeddings, session=db, material_id=material_id)
-    return {"code": 200, "status": "success", "message": f"已将教材 {material_id} 的向量化任务加入后台队列"}
+    return {"code": 200, "status": "success", "message": f" {material_id} "}
+
+
+@router.post("/{material_id}/retry", response_model=MaterialUploadResponse)
+async def retry_material(
+    material_id: str,
+    background_tasks: BackgroundTasks,
+    actor: CurrentActor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """"""
+    material = prepare_material_retry(session, material_id, user_id=actor.user_id)
+    background_tasks.add_task(run_full_extraction_workflow, material_id)
+    return MaterialUploadResponse(
+        code=200,
+        msg="success",
+        data=MaterialUploadData(material_id=material.id, status=material.status),
+    )
+
+
+@router.delete("/{material_id}")
+def delete_material(
+    material_id: str,
+    actor: CurrentActor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    """"""
+    # 
+    from backend.app.models.knowledge import Material
+    import os as _os
+
+    material = session.get(Material, material_id)
+    if material is None or material.user_id != actor.user_id:
+        raise HTTPException(status_code=404, detail=" ID ")
+
+    # 
+    vector_store.delete_material(material_id)
+
+    #  PDF
+    if material.raw_path and _os.path.exists(material.raw_path):
+        _os.remove(material.raw_path)
+
+    #  (CASCADE //)
+    session.delete(material)
+    session.commit()
+
+    return {"code": 200, "msg": "success", "data": {"material_id": material_id, "deleted": True}}

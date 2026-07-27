@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onBeforeUnmount, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { getKnowledgeTree, createKp, updateKp, deleteKp, regenerateKp } from '@/api/feynman'
+import { getKnowledgeTree, getKpDetail, createKp, updateKp, deleteKp, regenerateKp } from '@/api/feynman'
 
 const router = useRouter()
 const route = useRoute()
@@ -12,8 +12,12 @@ const subject = computed(() => route.query.subject || '计算机')
 
 const chapters = ref([])
 const loading = ref(false)
+const kpPollingTimers = new Map()
 
 const modal = ref(null)
+const chunkPreview = ref(null)
+const chunkPreviewLoading = ref(false)
+const chunkPreviewError = ref('')
 const formValues = ref({ name: '', pageStart: '', pageEnd: '' })
 const formErrors = ref({})
 
@@ -53,6 +57,50 @@ async function loadKnowledgeTree() {
   }
 }
 
+function updateLocalKp(chapterId, kpId, patch) {
+  chapters.value = chapters.value.map(ch =>
+    ch.id !== chapterId
+      ? ch
+      : {
+          ...ch,
+          kps: ch.kps.map(kp => kp.id === kpId ? { ...kp, ...patch } : kp)
+        }
+  )
+}
+
+function stopKpPolling(kpId) {
+  const timer = kpPollingTimers.get(kpId)
+  if (timer) clearTimeout(timer)
+  kpPollingTimers.delete(kpId)
+}
+
+async function pollKpUntilSettled(chapterId, kpId) {
+  stopKpPolling(kpId)
+
+  const poll = async () => {
+    try {
+      const detail = await getKpDetail(kpId)
+      updateLocalKp(chapterId, kpId, {
+        name: detail.name,
+        summary: detail.summary,
+        pageStart: detail.page_start,
+        pageEnd: detail.page_end,
+        status: detail.status
+      })
+      if (detail.status === 'done' || detail.status === 'failed') {
+        stopKpPolling(kpId)
+        return
+      }
+      kpPollingTimers.set(kpId, setTimeout(poll, 2000))
+    } catch (e) {
+      stopKpPolling(kpId)
+      console.error('轮询知识点状态失败:', e)
+    }
+  }
+
+  await poll()
+}
+
 function toggleChapter(id) {
   chapters.value = chapters.value.map(ch => 
     ch.id === id ? { ...ch, expanded: !ch.expanded } : ch
@@ -77,6 +125,23 @@ function openEditModal(chapterId, kp) {
 
 function openDeleteModal(chapterId, kp) {
   modal.value = { type: 'delete', chapterId, kp }
+}
+
+async function openChunkPreview(kp) {
+  chunkPreview.value = { kpName: kp.name, chunks: [] }
+  chunkPreviewLoading.value = true
+  chunkPreviewError.value = ''
+  try {
+    const detail = await getKpDetail(kp.id)
+    chunkPreview.value = {
+      kpName: detail.name,
+      chunks: detail.source_chunks || []
+    }
+  } catch (e) {
+    chunkPreviewError.value = e.message || '原文切片加载失败'
+  } finally {
+    chunkPreviewLoading.value = false
+  }
 }
 
 function validateForm() {
@@ -117,12 +182,7 @@ async function handleSubmit() {
           : ch
       )
       
-      setTimeout(() => {
-        chapters.value = chapters.value.map(ch => ({
-          ...ch,
-          kps: ch.kps.map(k => k.id === newKp.id ? { ...k, status: 'done' } : k)
-        }))
-      }, 4000)
+      pollKpUntilSettled(modal.value.chapterId, newKp.id)
     } catch (e) {
       console.error('创建知识点失败:', e)
     }
@@ -159,12 +219,7 @@ async function handleSubmit() {
       )
 
       if (pageChanged) {
-        setTimeout(() => {
-          chapters.value = chapters.value.map(ch => ({
-            ...ch,
-            kps: ch.kps.map(k => k.id === modal.value.kpId ? { ...k, status: 'done' } : k)
-          }))
-        }, 3500)
+        pollKpUntilSettled(modal.value.chapterId, modal.value.kpId)
       }
     } catch (e) {
       console.error('更新知识点失败:', e)
@@ -202,12 +257,7 @@ async function handleRegenerate(chapterId, kpId) {
           }
     )
     
-    setTimeout(() => {
-      chapters.value = chapters.value.map(ch => ({
-        ...ch,
-        kps: ch.kps.map(k => k.id === kpId ? { ...k, status: 'done' } : k)
-      }))
-    }, 3500)
+    pollKpUntilSettled(chapterId, kpId)
   } catch (e) {
     console.error('重新生成失败:', e)
   }
@@ -223,6 +273,11 @@ function goToSelect() {
 
 onMounted(() => {
   loadKnowledgeTree()
+})
+
+onBeforeUnmount(() => {
+  kpPollingTimers.forEach(timer => clearTimeout(timer))
+  kpPollingTimers.clear()
 })
 </script>
 
@@ -332,6 +387,18 @@ onMounted(() => {
                 </div>
 
                 <div class="kp-actions">
+                  <button
+                    v-if="kp.status === 'done'"
+                    class="action-btn"
+                    title="查看原文切片"
+                    aria-label="查看原文切片"
+                    @click="openChunkPreview(kp)"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M4 4h16v16H4z" />
+                      <path d="M8 8h8M8 12h8M8 16h5" />
+                    </svg>
+                  </button>
                   <button
                     v-if="kp.status === 'done' || kp.status === 'failed'"
                     class="action-btn"
@@ -451,6 +518,35 @@ onMounted(() => {
             <button class="btn-delete" @click="handleDeleteConfirm">确认删除</button>
           </div>
         </template>
+      </div>
+    </div>
+
+    <div v-if="chunkPreview" class="modal-overlay" @click="chunkPreview = null">
+      <div class="kp-modal chunk-modal" @click.stop>
+        <div class="modal-header">
+          <div>
+            <h2>教材原文切片</h2>
+            <div class="chunk-modal-subtitle">{{ chunkPreview.kpName }}</div>
+          </div>
+          <button class="close-btn" @click="chunkPreview = null">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div class="chunk-modal-body">
+          <div v-if="chunkPreviewLoading" class="chunk-empty">正在读取切片...</div>
+          <div v-else-if="chunkPreviewError" class="chunk-error">{{ chunkPreviewError }}</div>
+          <div v-else-if="chunkPreview.chunks.length === 0" class="chunk-empty">该知识点页码范围内没有原文切片</div>
+          <article v-for="chunk in chunkPreview.chunks" v-else :key="chunk.chunk_id" class="chunk-item">
+            <div class="chunk-meta">
+              <span>第 {{ chunk.page }} 页</span>
+              <code>{{ chunk.chunk_id }}</code>
+            </div>
+            <p>{{ chunk.text }}</p>
+          </article>
+        </div>
       </div>
     </div>
   </div>
@@ -761,6 +857,73 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+.chunk-modal {
+  max-width: 720px;
+  max-height: min(80vh, 760px);
+}
+
+.chunk-modal-subtitle {
+  margin-top: 3px;
+  color: #64748B;
+  font-size: 12px;
+}
+
+.chunk-modal-body {
+  padding: 16px 20px 20px;
+  overflow-y: auto;
+}
+
+.chunk-item {
+  padding: 14px;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  background: #F8FAFC;
+}
+
+.chunk-item + .chunk-item {
+  margin-top: 10px;
+}
+
+.chunk-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #2563EB;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chunk-meta code {
+  overflow: hidden;
+  color: #64748B;
+  font-size: 11px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chunk-item p {
+  margin: 0;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.chunk-empty,
+.chunk-error {
+  padding: 28px 12px;
+  color: #64748B;
+  font-size: 13px;
+  text-align: center;
+}
+
+.chunk-error {
+  color: #DC2626;
 }
 
 .modal-header {

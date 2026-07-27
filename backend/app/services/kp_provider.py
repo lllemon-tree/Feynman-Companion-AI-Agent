@@ -2,13 +2,14 @@ import json
 from copy import deepcopy
 from typing import Any, Dict, Optional, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from backend.app.core.database import engine
-from backend.app.models.knowledge import Chapter, KP
+from backend.app.models.knowledge import Chapter, Chunk, KP
+from backend.app.models.rag import RetrievedChunk
 from backend.app.services.knowledge_base import DIJKSTRA_GROUND_TRUTH
 
 
@@ -22,6 +23,7 @@ class KnowledgePoint(BaseModel):
     rubric: Dict[str, Any]
     material_id: str
     chapter_id: str
+    source_chunks: list[RetrievedChunk] = Field(default_factory=list)
 
 
 class KnowledgePointProvider(Protocol):
@@ -101,13 +103,29 @@ class SQLiteKnowledgePointProvider:
                 if not isinstance(rubric, dict):
                     return None
 
+                chunks = session.exec(
+                    select(Chunk)
+                    .where(Chunk.material_id == chapter.material_id)
+                    .where(Chunk.page_no >= kp.page_start)
+                    .where(Chunk.page_no <= kp.page_end)
+                    .order_by(Chunk.page_no, Chunk.seq)
+                ).all()
                 return KnowledgePoint(
                     kp_id=kp.id,
                     name=kp.name,
                     summary=kp.summary or "暂无摘要",
-                    rubric=_normalize_rubric(rubric),
+                    rubric=normalize_rubric(rubric),
                     material_id=chapter.material_id,
                     chapter_id=chapter.id,
+                    source_chunks=[
+                        RetrievedChunk(
+                            chunk_id=chunk.id,
+                            page_no=chunk.page_no,
+                            text=chunk.text,
+                            source="fixed",
+                        )
+                        for chunk in chunks
+                    ],
                 )
         except OperationalError:
             # The app lifespan creates tables. Before startup, demo data can still work.
@@ -127,7 +145,7 @@ class FallbackKnowledgePointProvider:
         return self._primary.get(kp_id) or self._fallback.get(kp_id)
 
 
-def _normalize_rubric(rubric: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_rubric(rubric: Dict[str, Any]) -> Dict[str, Any]:
     labels = {
         "concept_prerequisite": "概念前提",
         "core_mechanism": "核心机制",

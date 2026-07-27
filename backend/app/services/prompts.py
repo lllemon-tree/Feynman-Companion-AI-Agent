@@ -2,15 +2,31 @@ import json
 from typing import Any, Dict, Sequence
 
 from backend.app.models.feynman import ChatMessage
+from backend.app.models.rag import RetrievedChunk
 
 
-def build_system_prompt(kp_name: str, rubric: Dict[str, Any]) -> str:
+def build_system_prompt(
+    kp_name: str,
+    rubric: Dict[str, Any],
+    grounding_chunks: Sequence[RetrievedChunk] = (),
+) -> str:
+    fixed_context = _format_grounding(grounding_chunks, source="fixed")
+    rag_context = _format_grounding(grounding_chunks, source="rag")
     return f"""
 你现在是一个零基础、但充满好奇心的小白听众。你的任务是听用户讲解「{kp_name}」，
 通过逻辑推演找出他表述中的漏洞，用提问引导用户自己发现错误。
 
 【后台判分基准事实，绝对禁止原文泄露给用户】
 {json.dumps(rubric, ensure_ascii=False)}
+
+【知识点固定页码原文】
+{fixed_context}
+
+【单教材 RAG 补充原文】
+{rag_context}
+
+上述两类原文仅作为判分依据。若 RAG 补充原文为空，继续依据固定页码原文和四维基准评判；
+不要编造教材中没有出现的事实，也不要向用户泄露后台原文或判分基准。
 
 【对话与轮次规则】
 1. 最多发起3轮追问。第3轮追问后的下一次用户输入，无论是否完整，都必须生成最终报告。
@@ -49,25 +65,27 @@ def build_system_prompt(kp_name: str, rubric: Dict[str, Any]) -> str:
 """.strip()
 
 
+def _format_grounding(
+    chunks: Sequence[RetrievedChunk],
+    source: str,
+) -> str:
+    selected = [chunk for chunk in chunks if chunk.source == source]
+    if not selected:
+        return "（暂无）"
+    return "\n\n".join(
+        f"[第{chunk.page_no}页 / {chunk.chunk_id}]\n{chunk.text}"
+        for chunk in selected
+    )
+
+
 def build_user_prompt(
     messages: Sequence[ChatMessage],
     user_input: str,
     follow_up_count: int,
     max_follow_ups: int,
-    rag_chunks: list[Dict[str, Any]] = None,
+    grounding_chunks: Sequence[RetrievedChunk] = (),
 ) -> str:
     transcript = "\n".join(f"{message.role}: {message.content}" for message in messages[-8:])
-
-    # 如果有 RAG 检索到的跨章节原文，拼接到 Prompt 中
-    rag_section = ""
-    if rag_chunks:
-        rag_texts = "\n".join(
-            f"  [第 {c['page_no']} 页] {c['text']}" for c in rag_chunks
-        )
-        rag_section = f"""
-【教材相关原文参考（来自其他章节的语义相关内容）】
-{rag_texts}
-"""
 
     return f"""
 当前已发起追问轮数：{follow_up_count}/{max_follow_ups}
@@ -77,7 +95,6 @@ def build_user_prompt(
 
 用户本轮输入：
 {user_input}
-{rag_section}
 请根据规则判断下一步动作，并只返回 JSON。
 """.strip()
 

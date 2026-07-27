@@ -1,11 +1,18 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { uploadMaterial, getMaterialStatus, getKnowledgeTree, fetchSubjects } from '@/api/feynman'
+import {
+  fetchSubjects,
+  getKnowledgeTree,
+  getMaterialStatus,
+  retryMaterial,
+  uploadMaterial
+} from '@/api/feynman'
 
 const router = useRouter()
-const subjects = ref([])
-const selectedSubject = ref('')
+const DEFAULT_SUBJECTS = ['计算机', '数学', '政治']
+const subjects = ref(DEFAULT_SUBJECTS)
+const selectedSubject = ref('计算机')
 const subjectOpen = ref(false)
 const nameInput = ref('')
 const materials = ref([])
@@ -33,13 +40,13 @@ async function loadMaterials() {
     const tree = await getKnowledgeTree(selectedSubject.value)
     materials.value = tree.map(m => ({
       id: m.material_id,
-      name: m.title + '.pdf',
-      status: 'done',
-      step: undefined,
-      progress: undefined,
-      error: null
+      name: m.title,
+      status: m.status,
+      step: m.step,
+      progress: m.progress * 100,
+      error: m.error || null
     }))
-    
+
     materials.value.forEach(m => {
       if (['parsing', 'chunking', 'extracting', 'generating'].includes(m.status)) {
         startStatusPolling(m.id)
@@ -109,15 +116,20 @@ async function startUpload(file) {
   uploadError.value = ''
   
   try {
-    const result = await uploadMaterial(file, selectedSubject.value, nameInput.value, (percent) => {
-      uploadProgress.value = percent
-    })
+    const result = await uploadMaterial(
+      file,
+      selectedSubject.value,
+      nameInput.value.trim(),
+      (percent) => {
+        uploadProgress.value = percent
+      }
+    )
 
     isUploading.value = false
 
     const newMaterial = {
       id: result.material_id,
-      name: nameInput.value || file.name,
+      name: nameInput.value.trim() || file.name,
       status: result.status || 'parsing',
       step: result.step || 'parsing',
       progress: (result.progress || 0) * 100,
@@ -142,7 +154,7 @@ function startStatusPolling(materialId) {
       updateMaterial(materialId, {
         status: status.status,
         step: status.step,
-        progress: status.progress ? status.progress * 100 : undefined,
+        progress: status.progress == null ? undefined : status.progress * 100,
         error: status.error || null
       })
       
@@ -169,14 +181,23 @@ function updateMaterial(id, patch) {
   materials.value = materials.value.map(m => m.id === id ? { ...m, ...patch } : m)
 }
 
-function handleRetry(id) {
-  updateMaterial(id, { status: 'parsing', step: 'parsing', progress: 0, error: undefined })
-  startStatusPolling(id)
+async function handleRetry(id) {
+  try {
+    await retryMaterial(id)
+    updateMaterial(id, { status: 'parsing', step: '等待重新解析', progress: 0, error: undefined })
+    startStatusPolling(id)
+  } catch (e) {
+    showToastMsg(e.message || '重试失败')
+  }
 }
 
 function handleMaterialClick(m) {
   if (m.status !== 'done') return
   router.push(`/knowledge?materialId=${m.id}&subject=${selectedSubject.value}&name=${encodeURIComponent(m.name)}`)
+}
+
+function goToSelectPage() {
+  router.push('/select')
 }
 
 function showToastMsg(msg) {
@@ -196,17 +217,12 @@ function handleSubjectChange(s) {
 }
 
 onMounted(async () => {
-  subjects.value = await fetchSubjects()
-  if (subjects.value.length === 0) {
-    subjects.value = ['计算机', '数学', '政治']
+  try {
+    const storedSubjects = await fetchSubjects()
+    subjects.value = [...new Set([...DEFAULT_SUBJECTS, ...storedSubjects])]
+  } catch (e) {
+    console.warn('加载科目列表失败，使用默认科目:', e)
   }
-  selectedSubject.value = subjects.value[0]
-  loadMaterials()
-})
-
-watch(selectedSubject, () => {
-  pollingTimers.value.forEach(timer => clearInterval(timer))
-  pollingTimers.value.clear()
   loadMaterials()
 })
 </script>
@@ -215,50 +231,50 @@ watch(selectedSubject, () => {
   <div class="upload-page">
     <header class="upload-header">
       <span class="page-title">费曼伴学</span>
+      <div class="header-actions">
+        <div class="subject-dropdown">
+          <button
+            class="subject-btn"
+            @click="subjectOpen = !subjectOpen"
+            @blur="setTimeout(() => subjectOpen = false, 150)"
+          >
+            {{ selectedSubject }}
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ 'rotate-180': subjectOpen }">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+          <div v-if="subjectOpen" class="subject-menu">
+            <button
+              v-for="s in subjects"
+              :key="s"
+              class="subject-item"
+              :class="{ 'subject-item--selected': s === selectedSubject }"
+              @click="handleSubjectChange(s)"
+            >
+              {{ s }}
+            </button>
+          </div>
+        </div>
+        <button class="select-entry-btn" @click="goToSelectPage">
+          选择知识点
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M5 12h14M12 5l7 7-7 7" />
+          </svg>
+        </button>
+      </div>
     </header>
 
     <main class="upload-main">
       <h1 class="main-title">上传教材PDF</h1>
-
-      <div class="form-card">
-        <div class="form-field">
-          <label class="form-label">科目</label>
-          <div class="subject-dropdown">
-            <button
-              class="subject-btn"
-              @click="subjectOpen = !subjectOpen"
-              @blur="setTimeout(() => subjectOpen = false, 150)"
-            >
-              {{ selectedSubject || '请选择科目' }}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ 'rotate-180': subjectOpen }">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            <div v-if="subjectOpen" class="subject-menu">
-              <button
-                v-for="s in subjects"
-                :key="s"
-                class="subject-item"
-                :class="{ 'subject-item--selected': s === selectedSubject }"
-                @click="handleSubjectChange(s)"
-              >
-                {{ s }}
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="form-field">
-          <label class="form-label">教材名称</label>
-          <input
-            v-model="nameInput"
-            type="text"
-            placeholder="例：数据结构教材"
-            class="name-input"
-            :disabled="isUploading"
-          />
-        </div>
-      </div>
+      <label class="name-field">
+        <span>教材名称</span>
+        <input
+          v-model="nameInput"
+          type="text"
+          placeholder="留空则使用PDF文件名"
+          :disabled="isUploading"
+        />
+      </label>
 
       <div
         class="drop-zone"
@@ -376,7 +392,7 @@ watch(selectedSubject, () => {
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
-                  <span>已完成 · 点击查看知识点</span>
+                  <span>已完成 · PDF已切片入库 · 点击查看知识点</span>
                 </div>
               </template>
 
@@ -440,81 +456,66 @@ watch(selectedSubject, () => {
   color: #1E293B;
 }
 
-.upload-main {
-  flex: 1;
-  padding: 32px 16px;
-  max-width: 800px;
-  margin: 0 auto;
-  width: 100%;
+.header-actions {
   display: flex;
-  flex-direction: column;
-  gap: 28px;
+  align-items: center;
+  gap: 10px;
 }
 
-.main-title {
-  font-size: 20px;
-  font-weight: 600;
-  color: #1E293B;
-  margin: 0;
-}
-
-.form-card {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  background: #FFFFFF;
-  border: 1px solid #E2E8F0;
-  border-radius: 16px;
-  padding: 20px;
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
+.select-entry-btn {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-}
-
-.form-label {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #2563EB;
+  border-radius: 8px;
+  background: #2563EB;
+  color: #FFFFFF;
   font-size: 13px;
   font-weight: 600;
-  color: #64748B;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+}
+
+.select-entry-btn:hover {
+  border-color: #1D4ED8;
+  background: #1D4ED8;
 }
 
 .subject-dropdown {
   position: relative;
-  width: 100%;
 }
 
 .subject-btn {
-  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  border: 1px solid #CBD5E1;
-  font-size: 15px;
-  color: #1E293B;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
   background: #FFFFFF;
+  font-size: 14px;
+  font-weight: 500;
+  color: #1E293B;
   transition: all 150ms;
 }
 
 .subject-btn:hover {
-  border-color: rgba(37, 99, 235, 0.5);
+  background: #F1F5F9;
 }
 
 .subject-menu {
   position: absolute;
-  z-index: 50;
-  left: 0;
   right: 0;
-  top: calc(100% + 4px);
+  top: calc(100% + 6px);
+  width: 112px;
   background: #FFFFFF;
   border: 1px solid #E2E8F0;
   border-radius: 12px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
   overflow: hidden;
+  z-index: 40;
 }
 
 .subject-item {
@@ -536,30 +537,53 @@ watch(selectedSubject, () => {
   font-weight: 600;
 }
 
-.name-input {
+.upload-main {
+  flex: 1;
+  padding: 32px 16px;
+  max-width: 800px;
+  margin: 0 auto;
   width: 100%;
-  padding: 12px 16px;
-  border: 1px solid #CBD5E1;
-  border-radius: 12px;
-  font-size: 15px;
-  color: #1E293B;
-  background: #FFFFFF;
-  transition: all 150ms;
-  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
 }
 
-.name-input:focus {
+.main-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1E293B;
+  margin: 0;
+}
+
+.name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.name-field input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #1E293B;
+  font: inherit;
+  font-weight: 400;
   outline: none;
-  border-color: rgba(37, 99, 235, 0.5);
+  transition: border-color 150ms, box-shadow 150ms;
+}
+
+.name-field input:focus {
+  border-color: #2563EB;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
-.name-input:disabled {
+.name-field input:disabled {
   background: #F1F5F9;
-  color: #94A3B8;
-}
-
-.name-input::placeholder {
   color: #94A3B8;
 }
 

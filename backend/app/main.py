@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 # 导入我们在 core/config.py 里定义的 get_settings() 函数，用于读取配置
 from backend.app.api.routes import router as api_router
+from backend.app.api.auth import router as auth_router
 from backend.app.core.config import get_settings
 
 # 路由导入
@@ -62,5 +63,6 @@ async def health():
 
 
 app.include_router(api_router, prefix="/api/v1")
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(material_router, prefix="/api/v1")
 app.include_router(kp_router, prefix="/api/v1")

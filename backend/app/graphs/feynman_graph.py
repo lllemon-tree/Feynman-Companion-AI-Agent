@@ -5,16 +5,17 @@ from typing_extensions import TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from backend.app.models.feynman import FeynmanChatData, FeynmanChatRequest, NextAction
+from backend.app.models.rag import RetrievedChunk
 from backend.app.services.kp_provider import (
     DEFAULT_KP_ID,
     KnowledgePoint,
     KnowledgePointProvider,
 )
-from backend.app.services.rag_service import vector_store
+from backend.app.services.rag_retriever import RAGRetriever
 from backend.app.services.session_store import SessionState
 
 
-RouteName = Literal["kp_missing", "off_topic", "ineffective", "retrieve", "report"]
+RouteName = Literal["kp_missing", "off_topic", "ineffective", "evaluate", "report"]
 
 
 class FeynmanGraphState(TypedDict, total=False):
@@ -25,7 +26,7 @@ class FeynmanGraphState(TypedDict, total=False):
     response: FeynmanChatData
     provider: str
     fallback_used: bool
-    rag_chunks: list[dict]  # RAG 检索到的跨章节原文切片
+    grounding_chunks: list[RetrievedChunk]
 
 
 class FeynmanGraph:
@@ -36,12 +37,14 @@ class FeynmanGraph:
         kp_provider: KnowledgePointProvider,
         max_follow_ups: int,
         primary_provider_name: str,
+        rag_retriever: RAGRetriever,
     ) -> None:
         self._llm_client = llm_client
         self._fallback_client = fallback_client
         self._kp_provider = kp_provider
         self._max_follow_ups = max_follow_ups
         self._primary_provider_name = primary_provider_name
+        self._rag_retriever = rag_retriever
         self._graph = self._build_graph()
 
     async def run(
@@ -76,12 +79,18 @@ class FeynmanGraph:
                 "kp_missing": "kp_missing",
                 "off_topic": "off_topic",
                 "ineffective": "ineffective",
-                "retrieve": "retrieve",
+                "evaluate": "retrieve",
+                "report": "retrieve",
+            },
+        )
+        builder.add_conditional_edges(
+            "retrieve",
+            self._select_route,
+            {
+                "evaluate": "evaluate",
                 "report": "report",
             },
         )
-        # retrieve 完成后进入 evaluate 做 LLM 评判
-        builder.add_edge("retrieve", "evaluate")
         for node_name in ["kp_missing", "off_topic", "ineffective", "evaluate", "report"]:
             builder.add_edge(node_name, "persist_session")
         builder.add_edge("persist_session", END)
@@ -123,8 +132,9 @@ class FeynmanGraph:
         elif session.follow_up_count >= self._max_follow_ups:
             route = "report"
         else:
-            # 正常评估路径：先 retrieve 检索相关原文，再 evaluate
-            route = "retrieve"
+            # 正常路径：返回 evaluate，graph 会先经过 retrieve 节点再进入 evaluate
+            route = "evaluate"
+        print(f"🔵 _route_input: kp={knowledge_point.name if knowledge_point else 'None'}, follow_up={session.follow_up_count}/{self._max_follow_ups}, route={route}")
         return {"route": route}
 
     @staticmethod
@@ -177,35 +187,42 @@ class FeynmanGraph:
         }
 
     async def _retrieve(self, state: FeynmanGraphState) -> FeynmanGraphState:
-        """
-        RAG 检索节点：以用户输入为 query，检索教材中语义相关的 Top3 Chunk。
-        检索结果存入 rag_chunks，供 evaluate 节点注入 Prompt。
-        """
-        session = state["session"]
         request = state["request"]
-        material_id = session.material_id
+        knowledge_point = state["knowledge_point"]
+        assert knowledge_point is not None
 
-        rag_chunks = []
-        if material_id:
-            try:
-                rag_chunks = vector_store.search(
-                    material_id=material_id,
-                    query=request.user_input.strip(),
-                    top_k=3
-                )
-                if rag_chunks:
-                    print(f"🔍 RAG 检索到 {len(rag_chunks)} 条相关原文")
-            except Exception as e:
-                print(f"⚠️ RAG 检索失败（降级跳过）: {e}")
-                rag_chunks = []
+        rag_chunks: list[RetrievedChunk] = []
+        try:
+            raw_chunks = await self._rag_retriever.retrieve(
+                query=request.user_input.strip(),
+                material_id=knowledge_point.material_id,
+                top_k=3,
+            )
+            rag_chunks = [
+                chunk
+                if isinstance(chunk, RetrievedChunk)
+                else RetrievedChunk.model_validate(chunk)
+                for chunk in raw_chunks
+            ]
+            print(f"🔍 RAG _retrieve: material={knowledge_point.material_id}, query={request.user_input.strip()[:40]}..., source_chunks={len(knowledge_point.source_chunks)}, rag_chunks={len(rag_chunks)}")
+        except Exception as e:
+            print(f"⚠️ RAG _retrieve failed: {type(e).__name__}: {e}")
+            rag_chunks = []
 
-        return {"rag_chunks": rag_chunks}
+        merged: list[RetrievedChunk] = []
+        seen_ids: set[str] = set()
+        for chunk in [*knowledge_point.source_chunks, *rag_chunks]:
+            if chunk.chunk_id in seen_ids:
+                continue
+            seen_ids.add(chunk.chunk_id)
+            merged.append(chunk)
+        print(f"🔍 RAG merged: {len(merged)} total grounding chunks")
+        return {"grounding_chunks": merged}
 
     async def _evaluate(self, state: FeynmanGraphState) -> FeynmanGraphState:
         session = state["session"]
         request = state["request"]
         knowledge_point = state["knowledge_point"]
-        rag_chunks = state.get("rag_chunks", [])
         assert knowledge_point is not None
         try:
             response = await self._llm_client.evaluate(
@@ -214,7 +231,7 @@ class FeynmanGraph:
                 follow_up_count=session.follow_up_count,
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
-                rag_chunks=rag_chunks,
+                grounding_chunks=state.get("grounding_chunks", []),
             )
             response = _normalize_contract(response)
             return {
@@ -229,7 +246,7 @@ class FeynmanGraph:
                 follow_up_count=session.follow_up_count,
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
-                rag_chunks=rag_chunks,
+                grounding_chunks=state.get("grounding_chunks", []),
             )
             response = _normalize_contract(response)
             return {"response": response, "provider": "mock", "fallback_used": True}
@@ -239,19 +256,32 @@ class FeynmanGraph:
         request = state["request"]
         knowledge_point = state["knowledge_point"]
         assert knowledge_point is not None
-        response = await self._fallback_client.evaluate(
-            messages=session.messages,
-            user_input=request.user_input.strip(),
-            follow_up_count=self._max_follow_ups,
-            max_follow_ups=self._max_follow_ups,
-            knowledge_point=knowledge_point,
-        )
-        response = _normalize_contract(response)
-        return {
-            "response": response,
-            "provider": "mock",
-            "fallback_used": self._primary_provider_name != "mock",
-        }
+        try:
+            response = await self._llm_client.evaluate(
+                messages=session.messages,
+                user_input=request.user_input.strip(),
+                follow_up_count=self._max_follow_ups,
+                max_follow_ups=self._max_follow_ups,
+                knowledge_point=knowledge_point,
+                grounding_chunks=state.get("grounding_chunks", []),
+            )
+            response = _normalize_contract(response)
+            return {
+                "response": response,
+                "provider": self._primary_provider_name,
+                "fallback_used": False,
+            }
+        except Exception:
+            response = await self._fallback_client.evaluate(
+                messages=session.messages,
+                user_input=request.user_input.strip(),
+                follow_up_count=self._max_follow_ups,
+                max_follow_ups=self._max_follow_ups,
+                knowledge_point=knowledge_point,
+                grounding_chunks=state.get("grounding_chunks", []),
+            )
+            response = _normalize_contract(response)
+            return {"response": response, "provider": "mock", "fallback_used": True}
 
     @staticmethod
     def _persist_session(state: FeynmanGraphState) -> FeynmanGraphState:

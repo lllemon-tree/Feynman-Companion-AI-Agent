@@ -1,6 +1,6 @@
 # 费曼伴学智能体后端接口文档
 
-本文档面向前端对接，覆盖第四周 LangGraph 动态知识点对话接口。
+本文档面向前端对接，覆盖账号鉴权、LangGraph 动态知识点对话和会话恢复接口。
 
 ## 基础信息
 
@@ -8,6 +8,7 @@
 - Swagger 文档：`http://localhost:8000/docs`
 - Mock 知识点：`kp-demo`（Dijkstra）、`kp-demo2`（Floyd）
 - 会话机制：前端页面初始化时生成一个 `session_id`，同一轮对话必须一直使用同一个 `session_id` 和 `kp_id`
+- 鉴权机制：无 Token 时按游客 `guest` 处理；有 Token 时必须合法且未过期，否则返回 HTTP 401
 
 ## 1. 健康检查
 
@@ -28,7 +29,30 @@ GET /health
 
 前端一般不需要调用；联调时可以用来确认后端是否启动、DeepSeek 配置是否读取成功。
 
-## 2. 初始引导语
+## 2. 注册、登录与当前用户
+
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+```
+
+```json
+{
+  "username": "student01",
+  "password": "123456abc"
+}
+```
+
+注册成功后调用 `POST /api/v1/auth/login`，请求体相同。登录响应中的
+`data.token` 存入前端，并在后续请求中携带：
+
+```http
+Authorization: Bearer <token>
+```
+
+`GET /api/v1/auth/current` 必须携带 Token，用于刷新页面后恢复当前登录用户。
+
+## 3. 初始引导语
 
 ```http
 GET /api/v1/feynman/greeting?kp_id=kp-demo
@@ -50,7 +74,7 @@ GET /api/v1/feynman/greeting?kp_id=kp-demo
 
 前端处理：页面初始化时展示为第一条 AI 气泡。
 
-## 3. 费曼对话接口
+## 4. 费曼对话接口
 
 ```http
 POST /api/v1/feynman/chat
@@ -176,7 +200,7 @@ Content-Type: application/json
 }
 ```
 
-## 4. 重置会话
+## 5. 重置会话
 
 用于前端“重新开始”按钮。
 
@@ -208,7 +232,49 @@ Content-Type: application/json
 
 前端处理：清空聊天区，重新展示初始引导语，解锁输入框。
 
-## 5. Session 调试接口
+## 6. 历史会话列表
+
+```http
+GET /api/v1/feynman/sessions
+Authorization: Bearer <token>
+```
+
+返回当前用户的会话摘要，按最近更新时间倒序排列。游客可以省略 Header，
+此时只返回 `guest` 会话。
+
+## 7. 恢复完整会话
+
+```http
+GET /api/v1/feynman/sessions/{session_id}
+Authorization: Bearer <token>
+```
+
+游客请求可以省略 Header。后端只返回属于当前登录用户或游客账号的会话，
+其他用户的同名会话按 404 处理。响应中的 `chat_history` 用于恢复聊天气泡，
+`report_data` 用于恢复最终报告：
+
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "session_id": "demo-001",
+    "kp_id": "kp-demo",
+    "kp_name": "Dijkstra 算法",
+    "material_id": "mat-demo",
+    "chapter_id": "ch-demo",
+    "chat_history": [
+      {"role": "user", "content": "Dijkstra 用于求最短路径"},
+      {"role": "assistant", "content": "它对边权有什么要求？"}
+    ],
+    "report_data": null,
+    "created_at": "2026-07-23T10:00:00+00:00",
+    "updated_at": "2026-07-23T10:01:00+00:00"
+  }
+}
+```
+
+## 8. Session 调试接口
 
 仅用于开发联调，不建议展示给用户。
 
@@ -257,9 +323,10 @@ GET /api/v1/feynman/session/{session_id}
 ## 前端联调注意事项
 
 1. 同一轮对话必须复用同一个 `session_id` 和 `kp_id`。
-2. 页面刷新或点击“重新开始”时，建议生成新的 `session_id`，或调用 reset 接口。
+2. 页面刷新时使用原 `session_id` 请求 `/feynman/sessions/{session_id}` 恢复消息；点击“重新开始”时调用 reset 或生成新的 ID。
 3. 请求发出后锁定输入框和发送按钮，接口返回后再根据 `next_action` 决定是否解锁。
 4. `generate_report` 返回后，本轮对话结束，输入框应保持锁定。
 5. `card_preview` 和 `final_report` 只有在 `next_action=generate_report` 时才不是 `null`。
 6. 切换知识点前必须调用 reset 或生成新的 `session_id`，否则后端返回 `session is already bound to another kp_id`。
 7. 若知识点不存在或已删除，chat 返回 `next_action=guide_topic`，前端应跳回知识点选择页。
+8. 前端请求拦截器只在本地存在 Token 时添加 `Authorization`；不要给游客发送空 Bearer Token。

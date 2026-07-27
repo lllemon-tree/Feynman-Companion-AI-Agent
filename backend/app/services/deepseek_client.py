@@ -6,6 +6,7 @@ import httpx
 from backend.app.core.config import Settings
 from backend.app.models.feynman import ChatMessage, FeynmanChatData
 from backend.app.models.knowledge import KPExtractionResponse
+from backend.app.models.rag import RetrievedChunk
 from backend.app.services.kp_provider import KnowledgePoint
 from backend.app.services.prompts import (
     KP_EXTRACTION_SYSTEM_PROMPT,
@@ -28,19 +29,20 @@ class DeepSeekClient:
         follow_up_count: int,
         max_follow_ups: int,
         knowledge_point: KnowledgePoint,
-        rag_chunks: list[dict] = None,
+        grounding_chunks: Sequence[RetrievedChunk] = (),
     ) -> FeynmanChatData:
         parsed = await self._request_json(
             system_prompt=build_system_prompt(
                 kp_name=knowledge_point.name,
                 rubric=knowledge_point.rubric,
+                grounding_chunks=grounding_chunks,
             ),
             user_prompt=build_user_prompt(
                 messages=messages,
                 user_input=user_input,
                 follow_up_count=follow_up_count,
                 max_follow_ups=max_follow_ups,
-                rag_chunks=rag_chunks,
+                grounding_chunks=grounding_chunks,
             ),
         )
         return FeynmanChatData.model_validate(parsed)

@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from backend.app.core.database import engine
 # 导入底层数据库模型
 from backend.app.models.knowledge import Material, Chapter, KP
+from backend.app.models.auth import GUEST_USER_ID
 # 导入返回给前端的数据外壳
 from backend.app.models.knowledge import (
     MaterialStatusData, 
@@ -34,8 +35,7 @@ def update_material_status(
         material.status = status
         material.progress_step = step 
         material.progress = progress
-        if error:
-            material.error = error 
+        material.error = error
             
         session.add(material)
         session.commit()
@@ -43,12 +43,14 @@ def update_material_status(
 # ==========================================
 # 2. 供 API 层调用的读操作：查询状态
 # ==========================================
-def get_material_status_from_db(session: Session, material_id: str) -> MaterialStatusData:
+def get_material_status_from_db(session: Session, material_id: str, user_id: str = GUEST_USER_ID) -> MaterialStatusData:
     """从数据库查询教材当前的解析状态"""
     material = session.get(Material, material_id)
     if not material:
         raise HTTPException(status_code=404, detail="未找到该教材，请检查 ID 是否正确")
-        
+    if material.user_id != user_id:
+        raise HTTPException(status_code=404, detail="未找到该教材，请检查 ID 是否正确")
+
     return MaterialStatusData(
         material_id=material.id,
         status=material.status,
@@ -60,10 +62,13 @@ def get_material_status_from_db(session: Session, material_id: str) -> MaterialS
 # ==========================================
 # 3. 供 API 层调用的读操作：查询教材结构树
 # ==========================================
-def get_material_tree_from_db(session: Session, subject: str) -> list[MaterialTreeData]:
-    """级联查询：按科目查出 教材 -> 章节 -> 知识点"""
-    # 1. 查教材 (过滤掉解析失败的教材)
-    statement = select(Material).where(Material.subject == subject, Material.status != "failed")
+def get_material_tree_from_db(session: Session, subject: str, user_id: str = GUEST_USER_ID) -> list[MaterialTreeData]:
+    """级联查询：按科目查出 教材 -> 章节 -> 知识点，仅返回当前用户的教材"""
+    statement = (
+        select(Material)
+        .where(Material.subject == subject, Material.user_id == user_id)
+        .order_by(Material.uploaded_at.desc())
+    )
     materials = session.exec(statement).all()
     
     tree_list = []
@@ -84,7 +89,9 @@ def get_material_tree_from_db(session: Session, subject: str) -> list[MaterialTr
                     kp_id=kp.id,
                     name=kp.name,
                     summary=kp.summary or "暂无摘要",
-                    status=kp.status
+                    page_start=kp.page_start,
+                    page_end=kp.page_end,
+                    status=kp.status,
                 ) for kp in kps
             ]
             
@@ -98,17 +105,41 @@ def get_material_tree_from_db(session: Session, subject: str) -> list[MaterialTr
         # 组装单本教材的树结构
         tree_list.append(MaterialTreeData(
             material_id=mat.id,
-            title=mat.name, # 使用教材名称作为展示标题
+            title=mat.name or mat.filename,
+            status=mat.status,
+            step=mat.progress_step,
+            progress=mat.progress,
+            error=mat.error,
             chapters=chapter_items
         ))
         
     return tree_list
 
-# ==========================================
-# 4. 供 API 层调用的读操作：查询科目列表
-# ==========================================
-def get_subjects_from_db(session: Session) -> list[str]:
-    """从数据库查询所有已存在的科目（去重）"""
-    statement = select(Material.subject).distinct()
-    subjects = session.exec(statement).all()
-    return [s for s in subjects if s]
+
+def get_subjects_from_db(session: Session, user_id: str = GUEST_USER_ID) -> list[str]:
+    statement = (
+        select(Material.subject)
+        .where(Material.user_id == user_id)
+        .distinct()
+        .order_by(Material.subject)
+    )
+    return [subject for subject in session.exec(statement).all() if subject]
+
+
+def prepare_material_retry(session: Session, material_id: str, user_id: str = GUEST_USER_ID) -> Material:
+    material = session.get(Material, material_id)
+    if material is None:
+        raise HTTPException(status_code=404, detail="未找到该教材，请检查 ID 是否正确")
+    if material.user_id != user_id:
+        raise HTTPException(status_code=404, detail="未找到该教材，请检查 ID 是否正确")
+    if material.status != "failed":
+        raise HTTPException(status_code=409, detail="只有失败的教材可以重试")
+
+    material.status = "parsing"
+    material.progress_step = "等待重新解析"
+    material.progress = 0.0
+    material.error = None
+    session.add(material)
+    session.commit()
+    session.refresh(material)
+    return material

@@ -23,7 +23,7 @@ const routes = [
   },
   {
     path: '/',
-    redirect: '/select'
+    redirect: '/upload'
   }
 ]
 

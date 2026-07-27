@@ -7,8 +7,13 @@ import { getKnowledgeTree, fetchGreeting, fetchSubjects } from '@/api/feynman'
 const router = useRouter()
 const chatStore = useChatStore()
 
-const subjects = ref([])
-const selectedSubject = ref('')
+const DEFAULT_SUBJECTS = [
+  { value: '计算机', label: '计算机' },
+  { value: '数学', label: '数学' },
+  { value: '政治', label: '政治' }
+]
+const subjects = ref(DEFAULT_SUBJECTS)
+const selectedSubject = ref('计算机')
 const knowledgeTree = ref([])
 const selectedMaterialId = ref('')
 const selectedChapterId = ref('')
@@ -18,7 +23,7 @@ const loading = ref(false)
 
 const dropdownOpen = ref({})
 
-const materials = computed(() => knowledgeTree.value || [])
+const materials = computed(() => (knowledgeTree.value || []).filter(m => m.status === 'done'))
 const chapters = computed(() => {
   const material = materials.value.find(m => m.material_id === selectedMaterialId.value)
   return material?.chapters || []
@@ -140,8 +145,9 @@ async function startFeynman() {
   const kp = selectedKp.value
   const material = materials.value.find(m => m.material_id === selectedMaterialId.value)
   const chapter = chapters.value.find(c => c.chapter_id === selectedChapterId.value)
+  const subjectLabel = subjects.find(s => s.value === selectedSubject.value)?.label || ''
 
-  chatStore.setSubject(selectedSubject.value)
+  chatStore.setSubject(subjectLabel)
   chatStore.setMaterial(selectedMaterialId.value, material?.title || '')
   chatStore.setChapter(selectedChapterId.value, chapter?.title || '')
   chatStore.setKnowledgePoint(kp.kp_id, kp.name)
@@ -172,11 +178,13 @@ const toastMessage = ref('')
 const showToast = ref(false)
 
 onMounted(async () => {
-  subjects.value = await fetchSubjects()
-  if (subjects.value.length === 0) {
-    subjects.value = ['计算机', '数学', '政治']
+  try {
+    const storedSubjects = await fetchSubjects()
+    const values = [...new Set([...DEFAULT_SUBJECTS.map(item => item.value), ...storedSubjects])]
+    subjects.value = values.map(value => ({ value, label: value }))
+  } catch (e) {
+    console.warn('加载科目列表失败，使用默认科目:', e)
   }
-  selectedSubject.value = subjects.value[0]
   loadKnowledgeTree()
   document.addEventListener('click', (e) => {
     if (!e.target.closest('.dropdown-wrapper')) {
@@ -192,6 +200,14 @@ onMounted(async () => {
   <div class="select-page">
     <header class="select-header">
       <h1 class="page-title">选择知识点开始费曼学习</h1>
+      <button class="upload-entry-btn" @click="goToUploadPage">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        上传教材
+      </button>
     </header>
 
     <main class="select-main">
@@ -211,7 +227,7 @@ onMounted(async () => {
                   <rect x="3" y="14" width="7" height="7" rx="1" />
                   <rect x="14" y="14" width="7" height="7" rx="1" />
                 </svg>
-                <span>{{ selectedSubject || '请选择科目' }}</span>
+                <span>{{ subjects.find(s => s.value === selectedSubject)?.label }}</span>
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ 'rotate-180': dropdownOpen['subject'] }">
                   <polyline points="6 9 12 15 18 9" />
                 </svg>
@@ -219,12 +235,12 @@ onMounted(async () => {
               <div v-if="dropdownOpen['subject']" class="dropdown-menu">
                 <button
                   v-for="s in subjects"
-                  :key="s"
+                  :key="s.value"
                   class="dropdown-item"
-                  :class="{ 'dropdown-item--selected': s === selectedSubject }"
-                  @click="handleSubjectChange(s); closeDropdown('subject')"
+                  :class="{ 'dropdown-item--selected': s.value === selectedSubject }"
+                  @click="handleSubjectChange(s.value); closeDropdown('subject')"
                 >
-                  {{ s }}
+                  {{ s.label }}
                 </button>
               </div>
             </div>
@@ -414,6 +430,7 @@ onMounted(async () => {
   height: 56px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding: 0 24px;
 }
 
@@ -421,6 +438,28 @@ onMounted(async () => {
   font-size: 15px;
   font-weight: 600;
   color: #1E293B;
+}
+
+.upload-entry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #CBD5E1;
+  border-radius: 8px;
+  background: #FFFFFF;
+  color: #1E293B;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms, color 150ms;
+}
+
+.upload-entry-btn:hover {
+  border-color: #2563EB;
+  background: #EFF6FF;
+  color: #1D4ED8;
 }
 
 .select-main {

@@ -8,6 +8,7 @@ from backend.app.models.feynman import (
     FeynmanChatData,
     NextAction,
 )
+from backend.app.models.rag import RetrievedChunk
 from backend.app.services.kp_provider import KnowledgePoint
 
 
@@ -19,10 +20,11 @@ class MockLLMClient:
         follow_up_count: int,
         max_follow_ups: int,
         knowledge_point: KnowledgePoint,
-        rag_chunks: list[dict] = None,
+        grounding_chunks: Sequence[RetrievedChunk] = (),
     ) -> FeynmanChatData:
         text = _normalize(user_input)
-        all_text = _normalize(" ".join([message.content for message in messages] + [user_input]))
+        user_messages = [message.content for message in messages if message.role == "user"]
+        all_text = _normalize(" ".join(user_messages + [user_input]))
 
         if knowledge_point.kp_id != "kp-demo":
             return _evaluate_generic(

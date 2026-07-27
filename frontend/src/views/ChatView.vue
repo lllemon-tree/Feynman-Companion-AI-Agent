@@ -1,5 +1,6 @@
 <script setup>
 import { onMounted, ref, nextTick, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chatStore'
 import MessageBubble from '@/components/MessageBubble.vue'
 import LoadingBubble from '@/components/LoadingBubble.vue'
@@ -8,6 +9,7 @@ import ReportDrawer from '@/components/ReportDrawer.vue'
 import ChatInput from '@/components/ChatInput.vue'
 
 const store = useChatStore()
+const router = useRouter()
 const drawerOpen = ref(false)
 const messageListEl = ref(null)
 
@@ -38,8 +40,14 @@ onMounted(async () => {
   scrollToBottom(false)
 })
 
-function handleSend(text) {
-  store.sendUserMessage(text)
+async function handleSend(text) {
+  const response = await store.sendUserMessage(text)
+  if (
+    response?.next_action === 'guide_topic' &&
+    response?.reply_text?.includes('重新选择知识点')
+  ) {
+    setTimeout(() => router.push('/select'), 800)
+  }
 }
 
 async function handleRestart() {
