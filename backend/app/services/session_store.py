@@ -135,7 +135,12 @@ class SQLSessionStore:
     def get_or_create(
         self, session_id: str, user_id: str = GUEST_USER_ID
     ) -> SessionState:
-        state = self.get(session_id, user_id)
+        try:
+            state = self.get(session_id, user_id)
+            print(f"💾 SQLSessionStore.get_or_create: session={session_id}, user={user_id}, found={state is not None}")
+        except SessionAccessDeniedError:
+            print(f"💾 SQLSessionStore.get_or_create: session={session_id}, user={user_id}, ACCESS DENIED (wrong owner)")
+            raise
         if state is not None:
             return state
         return SessionState(session_id=session_id, user_id=user_id)
@@ -145,6 +150,7 @@ class SQLSessionStore:
     ) -> Optional[SessionState]:
         with Session(self._engine) as db:
             record = db.get(LearnSession, session_id)
+            print(f"💾 SQLSessionStore.get: session={session_id}, user={user_id}, db_record={'found' if record else 'None'}, db_user_id={record.user_id if record else 'N/A'}")
             if record is None:
                 return None
             if record.user_id != user_id:
@@ -161,6 +167,7 @@ class SQLSessionStore:
             self._apply_state(record, state)
             db.add(record)
             db.commit()
+            print(f"💾 SQLSessionStore.save: session={state.session_id} committed, messages={len(state.messages)}")
 
     def reset(self, session_id: str, user_id: str = GUEST_USER_ID) -> bool:
         with Session(self._engine) as db:

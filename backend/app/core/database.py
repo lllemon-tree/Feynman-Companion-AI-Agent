@@ -31,6 +31,20 @@ def create_db_and_tables():
         connection.execute(
             text("UPDATE material SET name = filename WHERE name IS NULL OR name = ''")
         )
+        # Week 5 migration: add user_id columns with default 'guest'
+        for table_name in ["material", "chapter", "chunk", "kp"]:
+            existing = {c["name"] for c in inspect(connection).get_columns(table_name)}
+            if "user_id" not in existing:
+                connection.execute(
+                    text(f"ALTER TABLE {table_name} ADD COLUMN user_id TEXT NOT NULL DEFAULT 'guest'")
+                )
+            # Create index if not exists
+            connection.execute(
+                text(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table_name}_user "
+                    f"ON {table_name}(user_id)"
+                )
+            )
     with Session(engine) as session:
         if session.get(User, GUEST_USER_ID) is None:
             session.add(

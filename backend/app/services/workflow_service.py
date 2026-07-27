@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from sqlmodel import Session, select
 
@@ -6,7 +7,9 @@ from backend.app.core.database import engine
 from backend.app.models.knowledge import Chapter, KP
 from backend.app.services.extraction_service import extract_kps_for_material, generate_rubric_for_kp
 from backend.app.services.material_service import update_material_status
+from backend.app.services.rag_service import build_material_embeddings
 
+logger = logging.getLogger(__name__)
 
 RUBRIC_GENERATION_TIMEOUT_SECONDS = 60
 
@@ -84,6 +87,15 @@ async def run_full_extraction_workflow(material_id: str) -> None:
 
         if failed_kp_ids:
             raise RuntimeError(f"{len(failed_kp_ids)} 个知识点的 rubric 生成失败")
+
+        # ==========================================
+        # 阶段 3：RAG 向量化
+        # ==========================================
+        try:
+            logger.info(f"开始为教材 {material_id} 执行异步向量化任务...")
+            build_material_embeddings(session=session, material_id=material_id)
+        except Exception as e:
+            logger.error(f"教材 {material_id} 向量化任务异常，但不阻塞总体进度: {e}")
 
         update_material_status(
             material_id=material_id,

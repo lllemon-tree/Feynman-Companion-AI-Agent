@@ -83,8 +83,10 @@ def build_user_prompt(
     user_input: str,
     follow_up_count: int,
     max_follow_ups: int,
+    grounding_chunks: Sequence[RetrievedChunk] = (),
 ) -> str:
     transcript = "\n".join(f"{message.role}: {message.content}" for message in messages[-8:])
+
     return f"""
 当前已发起追问轮数：{follow_up_count}/{max_follow_ups}
 
@@ -93,7 +95,6 @@ def build_user_prompt(
 
 用户本轮输入：
 {user_input}
-
 请根据规则判断下一步动作，并只返回 JSON。
 """.strip()
 

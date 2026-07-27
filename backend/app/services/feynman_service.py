@@ -54,13 +54,16 @@ class FeynmanService:
         request: FeynmanChatRequest,
         user_id: str = GUEST_USER_ID,
     ) -> FeynmanChatData:
+        print(f"🔵 chat called: session={request.session_id}, kp={request.kp_id}, user={user_id}")
         if not request.user_input.strip():
             raise ValueError("user_input cannot be empty")
 
         session = self._store.get_or_create(request.session_id, user_id)
+        print(f"🔵 session loaded: kp_id={session.kp_id}, material_id={session.material_id}, messages={len(session.messages)}")
         if session.ended and session.final_response is not None:
             return session.final_response
         response = await self._graph.run(request=request, session=session)
+        print(f"🔵 graph returned: next_action={response.next_action}")
         self._store.save(session)
         return response
 

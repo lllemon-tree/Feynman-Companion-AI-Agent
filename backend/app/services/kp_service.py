@@ -13,7 +13,8 @@ from fastapi import HTTPException
 # ==========================================
 # 导入底层数据库模型 (对应 feynman.db 里的真实表)
 # ==========================================
-from backend.app.models.knowledge import KP, Chapter, Chunk
+from backend.app.models.knowledge import KP, Chapter, Chunk, Material
+from backend.app.models.auth import GUEST_USER_ID
 
 # ==========================================
 # 导入前后端约定的数据格式 (Pydantic Schema)
@@ -26,16 +27,38 @@ from backend.app.models.knowledge import (
 )
 from backend.app.services.kp_provider import normalize_rubric
 
-def get_kp_detail_from_db(session: Session, kp_id: str) -> KPDetailData:
+
+def _check_kp_owner(session: Session, kp: KP, user_id: str) -> None:
+    """验证当前用户是否有权访问该知识点 (通过 KP → Chapter → Material 链)"""
+    chapter = session.get(Chapter, kp.chapter_id)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+    material = session.get(Material, chapter.material_id)
+    if material is None or material.user_id != user_id:
+        raise HTTPException(status_code=404, detail="知识点不存在")
+
+
+def _check_chapter_owner(session: Session, chapter_id: str, user_id: str) -> None:
+    """验证当前用户是否有权访问该章节"""
+    chapter = session.get(Chapter, chapter_id)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="所属章节不存在")
+    material = session.get(Material, chapter.material_id)
+    if material is None or material.user_id != user_id:
+        raise HTTPException(status_code=404, detail="所属章节不存在")
+
+
+def get_kp_detail_from_db(session: Session, kp_id: str, user_id: str = GUEST_USER_ID) -> KPDetailData:
     """
     获取知识点详情。
-    这里包含了 PRD 中最核心的“动态溯源”逻辑：不存 chunk_id，每次按页码现查。
+    这里包含了 PRD 中最核心的"动态溯源"逻辑：不存 chunk_id，每次按页码现查。
     """
     # 1. 用 session.get() 根据主键 ID 直接去 KP 表里抓取这条数据
     kp = session.get(KP, kp_id)
     # 如果没抓到，说明前端传的 ID 是错的，直接报错 404
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
+    _check_kp_owner(session, kp, user_id)
 
     # 2. 查这个知识点属于哪个章节。目的是为了拿到 material_id。
     chapter = session.get(Chapter, kp.chapter_id)
@@ -83,39 +106,38 @@ def get_kp_detail_from_db(session: Session, kp_id: str) -> KPDetailData:
         source_chunks=source_chunks
     )
 
-def create_kp_in_db(session: Session, request: KPCreateRequest) -> KPCreateData:
+def create_kp_in_db(session: Session, request: KPCreateRequest, user_id: str = GUEST_USER_ID) -> KPCreateData:
     """手动在数据库插入一个新的知识点"""
-    if session.get(Chapter, request.chapter_id) is None:
-        raise HTTPException(status_code=404, detail="所属章节不存在")
+    _check_chapter_owner(session, request.chapter_id, user_id)
 
     # 生成一个随机 ID，比如 kp-a1b2c3d4
     new_id = f"kp-{uuid.uuid4().hex[:8]}"
-    
+
     # 实例化一个 KP 数据库对象，把前端传过来的值塞进去
     new_kp = KP(
-        id=new_id, 
-        chapter_id=request.chapter_id, 
+        id=new_id,
+        chapter_id=request.chapter_id,
         name=request.name,
-        summary=request.summary, 
-        page_start=request.page_start, 
+        summary=request.summary,
+        page_start=request.page_start,
         page_end=request.page_end,
-        # 按照 PRD：刚建好的知识点必须等大模型处理，所以状态锁死为这个
-        status="pending_regenerate" 
+        status="pending_regenerate",
+        user_id=user_id,
     )
     
-    # 告诉数据库：“我要准备添加这行数据了”
+    # 告诉数据库："我要准备添加这行数据了"
     session.add(new_kp)
-    # 告诉数据库：“确认添加，立刻保存到硬盘上！” (不写这句就丢了)
+    # 告诉数据库："确认添加，立刻保存到硬盘上！" (不写这句就丢了)
     session.commit()
     
     return KPCreateData(kp_id=new_id, status=new_kp.status)
 
-def update_kp_in_db(session: Session, kp_id: str, request: KPUpdateRequest) -> KPUpdateData:
+def update_kp_in_db(session: Session, kp_id: str, request: KPUpdateRequest, user_id: str = GUEST_USER_ID) -> KPUpdateData:
     """局部更新知识点（修改名称或页码）"""
-    # 先把旧数据从数据库里抓出来
     kp = session.get(KP, kp_id)
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
+    _check_kp_owner(session, kp, user_id)
 
     # 提取前端传来的数据。exclude_unset=True 表示：前端没传的字段直接忽略，保留旧值
     update_data = request.model_dump(exclude_unset=True)
@@ -146,26 +168,26 @@ def update_kp_in_db(session: Session, kp_id: str, request: KPUpdateRequest) -> K
     
     return KPUpdateData(kp_id=kp.id, regenerate_triggered=regenerate_triggered, status=kp.status)
 
-def delete_kp_in_db(session: Session, kp_id: str) -> KPDeleteData:
+def delete_kp_in_db(session: Session, kp_id: str, user_id: str = GUEST_USER_ID) -> KPDeleteData:
     """物理硬删除知识点"""
     kp = session.get(KP, kp_id)
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
-        
-    # 直接告诉数据库：“删掉这行数据”
+    _check_kp_owner(session, kp, user_id)
+
     session.delete(kp)
     session.commit()
     return KPDeleteData(kp_id=kp_id, deleted=True)
 
-def trigger_regenerate_in_db(session: Session, kp_id: str) -> KPCreateData:
+def trigger_regenerate_in_db(session: Session, kp_id: str, user_id: str = GUEST_USER_ID) -> KPCreateData:
     """手动触发重跑大模型"""
     kp = session.get(KP, kp_id)
     if not kp:
         raise HTTPException(status_code=404, detail="知识点不存在")
-        
-    # 只需要把状态打回 pending_regenerate，后台管线就会自动发现它并处理
+    _check_kp_owner(session, kp, user_id)
+
     kp.status = "pending_regenerate"
     session.add(kp)
     session.commit()
-    
+
     return KPCreateData(kp_id=kp.id, status=kp.status)

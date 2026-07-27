@@ -7,7 +7,7 @@ from sqlmodel import Session, select
 
 from backend.app.core.database import engine
 from backend.app.core.config import get_settings
-from backend.app.models.knowledge import Chapter, Chunk, KP, RubricSchema
+from backend.app.models.knowledge import Chapter, Chunk, KP, Material, RubricSchema
 from backend.app.services.deepseek_client import DeepSeekClient
 
 
@@ -35,6 +35,10 @@ async def extract_kps_for_material(
         if not chunks:
             print(f"未找到 material_id={material_id} 的切片，退出提取逻辑。")
             return 0
+
+        # 读取教材的 user_id，用于新建 KP 时继承
+        material = session.get(Material, material_id)
+        material_user_id = material.user_id if material else "guest"
 
         print(f"开始为教材 {material_id} 抽取知识点，共需处理 {len(chunks)} 个切片。")
 
@@ -79,12 +83,13 @@ async def extract_kps_for_material(
 
                     new_kp = KP(
                         id=f"kp-{uuid.uuid4().hex[:8]}",
-                        chapter_id=chunk.chapter_id, # [核心变化] 直接复用切片自带的章节 ID
+                        chapter_id=chunk.chapter_id,
                         name=kp_data.name,
                         summary=kp_data.summary,
                         page_start=kp_data.page_no,
                         page_end=kp_data.page_no,
-                        status="pending_regenerate"  # 初始状态，等待后续的四维 Rubric 生成
+                        status="pending_regenerate",
+                        user_id=material_user_id,
                     )
                     session.add(new_kp)
                     kp_by_name[key] = new_kp

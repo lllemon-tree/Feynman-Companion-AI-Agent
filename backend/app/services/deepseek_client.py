@@ -42,6 +42,7 @@ class DeepSeekClient:
                 user_input=user_input,
                 follow_up_count=follow_up_count,
                 max_follow_ups=max_follow_ups,
+                grounding_chunks=grounding_chunks,
             ),
         )
         return FeynmanChatData.model_validate(parsed)
@@ -62,6 +63,18 @@ class DeepSeekClient:
     async def _request_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         if not self._settings.deepseek_configured:
             raise RuntimeError("DeepSeek API key is not configured.")
+
+        # ===== 调试：打印 Prompt 中是否包含 RAG 检索原文 =====
+        if "【教材相关原文参考" in user_prompt:
+            # 提取 RAG 段落的前 200 字
+            rag_start = user_prompt.find("【教材相关原文参考")
+            print(f"\n{'='*60}")
+            print(f"📚 RAG 检索原文已注入 Prompt，段落预览:")
+            print(f"{user_prompt[rag_start:rag_start+300]}...")
+            print(f"{'='*60}\n")
+        else:
+            print(f"\n⚠️ 本轮对话未注入 RAG 检索原文\n")
+        # =================================================
 
         payload = {
             "model": self._settings.deepseek_model,

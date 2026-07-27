@@ -11,8 +11,8 @@ from backend.app.services.kp_provider import (
     KnowledgePoint,
     KnowledgePointProvider,
 )
-from backend.app.services.session_store import SessionState
 from backend.app.services.rag_retriever import RAGRetriever
+from backend.app.services.session_store import SessionState
 
 
 RouteName = Literal["kp_missing", "off_topic", "ineffective", "evaluate", "report"]
@@ -132,7 +132,9 @@ class FeynmanGraph:
         elif session.follow_up_count >= self._max_follow_ups:
             route = "report"
         else:
+            # 正常路径：返回 evaluate，graph 会先经过 retrieve 节点再进入 evaluate
             route = "evaluate"
+        print(f"🔵 _route_input: kp={knowledge_point.name if knowledge_point else 'None'}, follow_up={session.follow_up_count}/{self._max_follow_ups}, route={route}")
         return {"route": route}
 
     @staticmethod
@@ -202,8 +204,9 @@ class FeynmanGraph:
                 else RetrievedChunk.model_validate(chunk)
                 for chunk in raw_chunks
             ]
-        except Exception:
-            # 向量库未就绪或检索失败时，固定页码原文仍可支撑评判。
+            print(f"🔍 RAG _retrieve: material={knowledge_point.material_id}, query={request.user_input.strip()[:40]}..., source_chunks={len(knowledge_point.source_chunks)}, rag_chunks={len(rag_chunks)}")
+        except Exception as e:
+            print(f"⚠️ RAG _retrieve failed: {type(e).__name__}: {e}")
             rag_chunks = []
 
         merged: list[RetrievedChunk] = []
@@ -213,6 +216,7 @@ class FeynmanGraph:
                 continue
             seen_ids.add(chunk.chunk_id)
             merged.append(chunk)
+        print(f"🔍 RAG merged: {len(merged)} total grounding chunks")
         return {"grounding_chunks": merged}
 
     async def _evaluate(self, state: FeynmanGraphState) -> FeynmanGraphState:

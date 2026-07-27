@@ -30,6 +30,7 @@ class Material(SQLModel, table=True):
     progress_step: Optional[str] = None  # 当前步骤文案
     progress: float = Field(default=0.0) # 0~1 的进度值
     error: Optional[str] = None          # 失败原因
+    user_id: str = Field(default="guest", foreign_key="user.id")
 
 # ---------------------------------------------------------
 # 2. Chapter (章节表)
@@ -47,6 +48,7 @@ class Chapter(SQLModel, table=True):
     title: str                           # 标题，如 "图论"
     page_start: Optional[int] = None     # 章节起始页
     page_end: Optional[int] = None       # 章节结束页
+    user_id: str = Field(default="guest")
 
 # ---------------------------------------------------------
 # 3. Chunk (切片表)
@@ -64,6 +66,7 @@ class Chunk(SQLModel, table=True):
     page_no: int    # 切片所在页码，这是后续知识点找原文的关键
     seq: int        # 同页内的顺序，保证拼接时文本连贯
     text: str       # 切片的具体文本内容
+    user_id: str = Field(default="guest")
 
 # ---------------------------------------------------------
 # 4. KP (知识点表)
@@ -84,9 +87,10 @@ class KP(SQLModel, table=True):
     
     # 状态枚举：done/failed/pending_regenerate
     status: str = Field(default="pending_regenerate")
-    
+
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    user_id: str = Field(default="guest")
 
 
 # ---------------------------------------------------------

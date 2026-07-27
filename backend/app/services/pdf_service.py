@@ -41,6 +41,7 @@ def save_and_process_pdf(
     subject: str,
     filename: str | None = None,
     name: str | None = None,
+    user_id: str = "guest",
 ) -> str:
     """
     接收 PDF 字节流，保存到本地，解析目录构建章节，然后切片并存入数据库。
@@ -100,7 +101,8 @@ def save_and_process_pdf(
                 chapter_no=f"第{i + 1}章",
                 title=title.strip(),
                 page_start=page_start,
-                page_end=page_end
+                page_end=page_end,
+                user_id=user_id,
             )
         )
 
@@ -113,6 +115,7 @@ def save_and_process_pdf(
                 title="全文（无目录）",
                 page_start=1,
                 page_end=doc.page_count,
+                user_id=user_id,
             )
         )
 
@@ -126,7 +129,8 @@ def save_and_process_pdf(
             filename=filename or f"{material_id}.pdf",
             raw_path=file_path,
             uploaded_at=datetime.now(),
-            status="parsing"        # 初始状态
+            status="parsing",
+            user_id=user_id,
         )
         session.add(new_material)
 
@@ -159,10 +163,11 @@ def save_and_process_pdf(
                 chunk = Chunk(
                     id=str(uuid.uuid4()),
                     material_id=material_id,
-                    chapter_id=current_chapter_id, # [修改点2] 将切片与对应章节绑定
+                    chapter_id=current_chapter_id,
                     page_no=current_page_no,
                     seq=seq + 1,
-                    text=content
+                    text=content,
+                    user_id=user_id,
                 )
                 session.add(chunk)
                 
