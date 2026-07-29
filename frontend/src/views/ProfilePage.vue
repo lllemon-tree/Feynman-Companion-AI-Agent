@@ -155,11 +155,15 @@ async function viewReportDetail(report) {
   showReportDetail.value = true
   reportDetailLoading.value = true
   try {
-    // 可选：获取更详细的报告内容
-    // const detail = await getReportDetail(report.report_id)
-    // selectedReport.value = detail
+    const detail = await getReportDetail(report.report_id)
+    // 详情接口返回 dimensions_full，ReportDrawer 需要 dimensions 字段
+    selectedReport.value = {
+      ...detail,
+      dimensions: detail.dimensions_full || report.dimensions
+    }
   } catch (e) {
     console.error('获取报告详情失败', e)
+    selectedReport.value = report
   } finally {
     reportDetailLoading.value = false
   }
@@ -753,8 +757,8 @@ onMounted(() => {
 
     <!-- 报告详情弹窗 -->
     <ReportDrawer
-      :visible="showReportDetail"
-      :report-data="selectedReport"
+      :open="showReportDetail"
+      :report="selectedReport"
       @close="showReportDetail = false"
     />
 
