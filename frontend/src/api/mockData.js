@@ -328,3 +328,216 @@ export const MOCK_SESSIONS = {
     }
   ]
 }
+
+// 学情画像Mock数据
+export const MOCK_USER_PROFILE = {
+  code: 200,
+  msg: 'success',
+  data: {
+    user_id: 'user-demo',
+    nickname: '考研小王',
+    exam_subject: '计算机',
+    exam_sub_category: '408统考',
+    preparation_stage: '基础',
+    exam_type: '应届',
+    pain_points: ['概念理解困难', '输出薄弱'],
+    target_school: '',
+    target_major: ''
+  }
+}
+
+export const MOCK_USER_PROFILE_EMPTY = {
+  code: 200,
+  msg: 'success',
+  data: {
+    user_id: 'user-demo',
+    nickname: null,
+    exam_subject: null,
+    exam_sub_category: null,
+    preparation_stage: null,
+    exam_type: null,
+    pain_points: [],
+    target_school: null,
+    target_major: null
+  }
+}
+
+export const MOCK_USER_PROFILE_SAVE = {
+  code: 200,
+  msg: '学情信息已保存',
+  data: {
+    user_id: 'user-demo',
+    exam_subject: '计算机'
+  }
+}
+
+// 知识漏洞库Mock数据
+export const MOCK_GAPS = {
+  code: 200,
+  msg: 'success',
+  data: {
+    items: [
+      {
+        gap_id: 'gap-demo-1',
+        kp_id: 'kp-demo',
+        kp_name: 'Dijkstra 算法',
+        dimension: '理解深度',
+        score: 4,
+        severity: 4,
+        status: 'open',
+        gap_description: '能描述算法步骤，但无法解释贪心策略的正确性依赖非负权边的前提条件',
+        created_at: '2026-07-28T10:30:00'
+      },
+      {
+        gap_id: 'gap-demo-2',
+        kp_id: 'kp-demo',
+        kp_name: 'Dijkstra 算法',
+        dimension: '原理证明',
+        score: 3,
+        severity: 5,
+        status: 'open',
+        gap_description: '无法证明贪心选择性质，混淆算法正确性和反证法的逻辑',
+        created_at: '2026-07-28T10:30:00'
+      },
+      {
+        gap_id: 'gap-demo-3',
+        kp_id: 'kp-mst',
+        kp_name: '最小生成树',
+        dimension: '结构化能力',
+        score: 5,
+        severity: 4,
+        status: 'reviewing',
+        gap_description: 'Kruskal和Prim算法的使用场景区分不清晰',
+        created_at: '2026-07-27T14:20:00'
+      },
+      {
+        gap_id: 'gap-demo-4',
+        kp_id: 'kp-topo',
+        kp_name: '拓扑排序',
+        dimension: '表达完整性',
+        score: 6,
+        severity: 3,
+        status: 'resolved',
+        gap_description: '对拓扑排序的应用场景（如任务调度）描述不够完整',
+        created_at: '2026-07-25T09:15:00'
+      }
+    ],
+    total: 4,
+    page: 1,
+    page_size: 20
+  }
+}
+
+export const MOCK_GAPS_STATS = {
+  code: 200,
+  msg: 'success',
+  data: {
+    total: 4,
+    by_status: {
+      open: 2,
+      reviewing: 1,
+      resolved: 1
+    },
+    by_dimension: {
+      '理解深度': 1,
+      '表达完整性': 1,
+      '逻辑连贯性': 0,
+      '结构化能力': 1,
+      '原理证明': 1
+    }
+  }
+}
+
+export const MOCK_GAP_UPDATE = {
+  code: 200,
+  msg: 'success',
+  data: {
+    gap_id: 'gap-demo-1',
+    status: 'resolved'
+  }
+}
+
+// 历史报告Mock数据
+export const MOCK_REPORTS = {
+  code: 200,
+  msg: 'success',
+  data: {
+    items: [
+      {
+        report_id: 'rpt-demo-1',
+        kp_id: 'kp-demo',
+        kp_name: 'Dijkstra 算法',
+        material_name: '数据结构教材',
+        total_score: 24,
+        dimensions: [
+          { name: '理解深度', score: 4 },
+          { name: '表达完整性', score: 6 },
+          { name: '逻辑连贯性', score: 7 },
+          { name: '结构化能力', score: 7 }
+        ],
+        gaps_identified: 2,
+        created_at: '2026-07-28T10:30:00'
+      },
+      {
+        report_id: 'rpt-demo-2',
+        kp_id: 'kp-demo2',
+        kp_name: 'Floyd 算法',
+        material_name: '数据结构教材',
+        total_score: 32,
+        dimensions: [
+          { name: '理解深度', score: 8 },
+          { name: '表达完整性', score: 8 },
+          { name: '逻辑连贯性', score: 8 },
+          { name: '结构化能力', score: 8 }
+        ],
+        gaps_identified: 0,
+        created_at: '2026-07-27T14:20:00'
+      }
+    ],
+    total: 2,
+    page: 1,
+    page_size: 20
+  }
+}
+
+export const MOCK_REPORT_DETAIL = {
+  code: 200,
+  msg: 'success',
+  data: {
+    report_id: 'rpt-demo-1',
+    kp_id: 'kp-demo',
+    kp_name: 'Dijkstra 算法',
+    material_name: '数据结构教材',
+    session_id: 'sess-001',
+    dimensions_full: [
+      {
+        name: '理解深度',
+        score: 4,
+        analysis: '能描述Dijkstra算法的步骤，但无法解释其正确性依据和复杂度分析的数学原理',
+        suggestion: '建议从贪心策略的定义出发，结合反证法理解算法的正确性'
+      },
+      {
+        name: '表达完整性',
+        score: 6,
+        analysis: '基本覆盖了算法流程，但遗漏了非负权前提条件和算法适用范围的说明',
+        suggestion: '讲解时注意明确算法的前提条件，说明适用场景和局限性'
+      },
+      {
+        name: '逻辑连贯性',
+        score: 7,
+        analysis: '步骤描述基本通顺，但各步骤间的因果关系阐述不够紧密',
+        suggestion: '尝试使用"因为...所以..."的句式将步骤串联起来'
+      },
+      {
+        name: '结构化能力',
+        score: 7,
+        analysis: '整体结构清晰，能够分点阐述，但优化部分的阐述略显分散',
+        suggestion: '可以使用表格或对比方式展示不同实现的时间复杂度'
+      }
+    ],
+    total_score: 24,
+    overall_comment: '本次讲解体现了对Dijkstra算法的基础了解，但在原理深度和表达完整性方面还有提升空间。建议重点攻克贪心策略的正确性证明，并在讲解时更加注重前提条件和适用范围的说明。',
+    gaps_identified: 2,
+    created_at: '2026-07-28T10:30:00'
+  }
+}

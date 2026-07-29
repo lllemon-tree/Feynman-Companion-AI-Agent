@@ -1,6 +1,7 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthStore } from '@/stores/authStore'
 import {
   fetchSubjects,
   getKnowledgeTree,
@@ -9,8 +10,10 @@ import {
   uploadMaterial
 } from '@/api/feynman'
 import UserBar from '@/components/UserBar.vue'
+import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const DEFAULT_SUBJECTS = ['计算机', '数学', '政治']
 const subjects = ref(DEFAULT_SUBJECTS)
 const selectedSubject = ref('计算机')
@@ -26,6 +29,10 @@ const dragCounterRef = ref(0)
 
 const toastMessage = ref('')
 const showToast = ref(false)
+
+// 学情初始化弹窗
+const isLoggedIn = computed(() => authStore.isLoggedIn)
+const showProfileModal = ref(false)
 
 const STEP_LABELS = {
   parsing: '解析中',
@@ -225,7 +232,21 @@ onMounted(async () => {
     console.warn('加载科目列表失败，使用默认科目:', e)
   }
   loadMaterials()
+  
+  // 首次登录自动弹出学情初始化弹窗
+  if (isLoggedIn.value) {
+    showProfileModal.value = true
+  }
 })
+
+function closeProfileModal() {
+  showProfileModal.value = false
+}
+
+function handleProfileSaved() {
+  // 学情保存成功后关闭弹窗
+  showProfileModal.value = false
+}
 </script>
 
 <template>
@@ -427,6 +448,14 @@ onMounted(async () => {
     </main>
 
     <div v-if="showToast" class="toast">{{ toastMessage }}</div>
+
+    <!-- 学情初始化弹窗 -->
+    <ProfileSetupModal
+      :visible="showProfileModal"
+      mode="create"
+      @close="closeProfileModal"
+      @saved="handleProfileSaved"
+    />
   </div>
 </template>
 

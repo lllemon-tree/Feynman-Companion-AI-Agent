@@ -35,6 +35,7 @@ export const useAuthStore = defineStore('auth', {
       this.errorMsg = ''
       localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem(USER_KEY)
+      localStorage.removeItem('feynman_guest')
     },
 
     async login(username, password) {

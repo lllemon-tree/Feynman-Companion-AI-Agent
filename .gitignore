@@ -23,3 +23,5 @@ uploads/
 .env.local
 .env.*.local
 *.local
+.env.development
+.env.production
