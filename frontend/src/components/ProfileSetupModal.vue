@@ -29,19 +29,8 @@ const formData = reactive({
   target_major: ''
 })
 
-const subjects = [
-  { name: '计算机', icon: '💻' },
-  { name: '政治', icon: '📚' },
-  { name: '数学', icon: '🔢' },
-  { name: '英语', icon: '🌍' },
-  { name: '专业课一', icon: '🔬' },
-  { name: '专业课二', icon: '⚗️' },
-  { name: '其他', icon: '📝' }
-]
-const subCategories = [
-  { name: '统考408', icon: '🎯' },
-  { name: '自命题', icon: '✍️' }
-]
+const subjects = ['计算机', '政治', '数学', '英语', '专业课一', '专业课二', '其他']
+const subCategories = ['统考408', '自命题']
 const stages = ['基础', '强化', '冲刺']
 const examTypes = ['应届', '二战', '在职']
 const painPoints = ['概念理解困难', '输出薄弱', '知识碎片化', '盲目刷题', '自律性差']
@@ -109,11 +98,11 @@ onUnmounted(() => {
 })
 
 function getSelectedSubject() {
-  return subjects.find(s => s.name === formData.exam_subject)
+  return subjects.find(s => s === formData.exam_subject)
 }
 
 function getSelectedSubCat() {
-  return subCategories.find(c => c.name === formData.exam_sub_category)
+  return subCategories.find(c => c === formData.exam_sub_category)
 }
 
 const isSubmitting = ref(false)
@@ -209,8 +198,7 @@ async function handleSubmit() {
               @click.stop="toggleSubjectDropdown"
             >
               <template v-if="getSelectedSubject()">
-                <span class="dropdown-selected-icon">{{ getSelectedSubject().icon }}</span>
-                <span class="dropdown-selected-text">{{ getSelectedSubject().name }}</span>
+                <span class="dropdown-selected-text">{{ getSelectedSubject() }}</span>
               </template>
               <template v-else>
                 <span class="dropdown-placeholder">请选择学科</span>
@@ -227,15 +215,14 @@ async function handleSubmit() {
             <div v-if="subjectDropdownOpen" class="dropdown-panel">
               <button
                 v-for="subject in subjects"
-                :key="subject.name"
+                :key="subject"
                 class="dropdown-item"
-                :class="{ 'dropdown-item--active': formData.exam_subject === subject.name }"
-                @click.stop="selectSubject(subject.name)"
+                :class="{ 'dropdown-item--active': formData.exam_subject === subject }"
+                @click.stop="selectSubject(subject)"
               >
-                <span class="dropdown-item-icon">{{ subject.icon }}</span>
-                <span class="dropdown-item-text">{{ subject.name }}</span>
+                <span class="dropdown-item-text">{{ subject }}</span>
                 <svg
-                  v-if="formData.exam_subject === subject.name"
+                  v-if="formData.exam_subject === subject"
                   width="14" height="14" viewBox="0 0 24 24"
                   fill="none" stroke="currentColor" stroke-width="2.5"
                   class="dropdown-item-check"
@@ -256,8 +243,7 @@ async function handleSubmit() {
               @click.stop="toggleSubCatDropdown"
             >
               <template v-if="getSelectedSubCat()">
-                <span class="dropdown-selected-icon">{{ getSelectedSubCat().icon }}</span>
-                <span class="dropdown-selected-text">{{ getSelectedSubCat().name }}</span>
+                <span class="dropdown-selected-text">{{ getSelectedSubCat() }}</span>
               </template>
               <template v-else>
                 <span class="dropdown-placeholder">请选择方向</span>
@@ -274,15 +260,14 @@ async function handleSubmit() {
             <div v-if="subCatDropdownOpen" class="dropdown-panel">
               <button
                 v-for="cat in subCategories"
-                :key="cat.name"
+                :key="cat"
                 class="dropdown-item"
-                :class="{ 'dropdown-item--active': formData.exam_sub_category === cat.name }"
-                @click.stop="selectSubCategory(cat.name)"
+                :class="{ 'dropdown-item--active': formData.exam_sub_category === cat }"
+                @click.stop="selectSubCategory(cat)"
               >
-                <span class="dropdown-item-icon">{{ cat.icon }}</span>
-                <span class="dropdown-item-text">{{ cat.name }}</span>
+                <span class="dropdown-item-text">{{ cat }}</span>
                 <svg
-                  v-if="formData.exam_sub_category === cat.name"
+                  v-if="formData.exam_sub_category === cat"
                   width="14" height="14" viewBox="0 0 24 24"
                   fill="none" stroke="currentColor" stroke-width="2.5"
                   class="dropdown-item-check"
