@@ -392,7 +392,7 @@ export const MOCK_GAPS = {
         gap_id: 'gap-demo-2',
         kp_id: 'kp-demo',
         kp_name: 'Dijkstra 算法',
-        dimension: '原理证明',
+        dimension: '逻辑连贯性',
         score: 3,
         severity: 5,
         status: 'open',
@@ -441,9 +441,8 @@ export const MOCK_GAPS_STATS = {
     by_dimension: {
       '理解深度': 1,
       '表达完整性': 1,
-      '逻辑连贯性': 0,
-      '结构化能力': 1,
-      '原理证明': 1
+      '逻辑连贯性': 1,
+      '结构化能力': 1
     }
   }
 }
