@@ -21,6 +21,7 @@ def create_db_and_tables():
     并在 feynman.db 中自动执行 CREATE TABLE 语句。
     """
     from backend.app.models.auth import GUEST_USER_ID, User, utc_now
+    from backend.app.models.diagnostic_report import DiagnosticReport
     from backend.app.models.knowledge import Chapter, Chunk, KP, LearnSession, Material
 
     SQLModel.metadata.create_all(engine)

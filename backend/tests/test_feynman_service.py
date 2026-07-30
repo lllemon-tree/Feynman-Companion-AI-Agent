@@ -24,6 +24,11 @@ class RecordingLLMClient:
         return await self._delegate.evaluate(**kwargs)
 
 
+class FailingReportFinalizer:
+    def finalize(self, session_state, response):
+        raise RuntimeError("simulated report persistence failure")
+
+
 class FeynmanServiceTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.service = FeynmanService(
@@ -235,6 +240,30 @@ class FeynmanServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.next_action, NextAction.GENERATE_REPORT)
         self.assertEqual(primary.calls, 4)
+
+    async def test_report_persistence_failure_does_not_block_chat_response(self):
+        service = FeynmanService(
+            store=InMemorySessionStore(),
+            llm_client=MockLLMClient(),
+            fallback_client=MockLLMClient(),
+            report_finalizer=FailingReportFinalizer(),
+        )
+        response = None
+        for answer in [
+            "Dijkstra 用于求最短路径",
+            "它选择当前距离最小的未访问节点",
+            "然后松弛相邻边",
+            "非负权保证已确定距离不会再变短",
+        ]:
+            response = await service.chat(
+                FeynmanChatRequest(
+                    session_id="report-failure",
+                    user_input=answer,
+                )
+            )
+
+        self.assertEqual(response.next_action, NextAction.GENERATE_REPORT)
+        self.assertIsNotNone(response.final_report)
 
 
 class FeynmanApiTest(unittest.TestCase):

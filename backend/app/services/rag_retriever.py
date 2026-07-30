@@ -2,7 +2,6 @@ from functools import lru_cache
 from typing import Protocol
 
 from backend.app.models.rag import RetrievedChunk
-from backend.app.services.vector_store import vector_store
 
 
 class RAGRetriever(Protocol):
@@ -35,6 +34,8 @@ class ChromaRAGRetriever:
         material_id: str,
         top_k: int = 3,
     ) -> list[RetrievedChunk]:
+        from backend.app.services.vector_store import vector_store
+
         raw = vector_store.search(
             material_id=material_id,
             query=query,
