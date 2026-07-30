@@ -1,3 +1,4 @@
+import logging
 from functools import lru_cache
 from typing import Optional
 
@@ -16,13 +17,22 @@ from backend.app.models.feynman import (
     SessionSummaryData,
 )
 from backend.app.services.deepseek_client import DeepSeekClient
+from backend.app.services.diagnostic_report_service import (
+    DiagnosticReportFinalizer,
+    NullReportFinalizer,
+    ReportFinalizer,
+)
 from backend.app.services.kp_provider import DEFAULT_KP_ID, KnowledgePointProvider, kp_provider
 from backend.app.services.mock_llm import MockLLMClient
 from backend.app.services.rag_retriever import RAGRetriever, get_rag_retriever
 from backend.app.services.session_store import (
     SQLSessionStore,
+    SessionState,
     SessionStore,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class FeynmanService:
@@ -33,11 +43,13 @@ class FeynmanService:
         fallback_client=None,
         knowledge_point_provider: Optional[KnowledgePointProvider] = None,
         rag_retriever: Optional[RAGRetriever] = None,
+        report_finalizer: Optional[ReportFinalizer] = None,
     ) -> None:
         self._store = store
         self._llm_client = llm_client
         self._fallback_client = fallback_client or MockLLMClient()
         self._kp_provider = knowledge_point_provider or kp_provider
+        self._report_finalizer = report_finalizer or NullReportFinalizer()
         self._settings = get_settings()
         primary_provider_name = "deepseek" if isinstance(llm_client, DeepSeekClient) else "mock"
         self._graph = FeynmanGraph(
@@ -61,11 +73,26 @@ class FeynmanService:
         session = self._store.get_or_create(request.session_id, user_id)
         print(f"🔵 session loaded: kp_id={session.kp_id}, material_id={session.material_id}, messages={len(session.messages)}")
         if session.ended and session.final_response is not None:
+            self._finalize_report_safely(session, session.final_response)
             return session.final_response
         response = await self._graph.run(request=request, session=session)
         print(f"🔵 graph returned: next_action={response.next_action}")
         self._store.save(session)
+        self._finalize_report_safely(session, response)
         return response
+
+    def _finalize_report_safely(
+        self,
+        session: SessionState,
+        response: FeynmanChatData,
+    ) -> None:
+        try:
+            self._report_finalizer.finalize(session, response)
+        except Exception:
+            logger.exception(
+                "diagnostic report persistence failed for session %s",
+                session.session_id,
+            )
 
     def greeting(self, kp_id: Optional[str] = None) -> GreetingData:
         knowledge_point = self._kp_provider.get(kp_id or DEFAULT_KP_ID)
@@ -163,4 +190,5 @@ def get_feynman_service() -> FeynmanService:
         store=SQLSessionStore(engine),
         llm_client=llm_client,
         fallback_client=MockLLMClient(),
+        report_finalizer=DiagnosticReportFinalizer(engine),
     )

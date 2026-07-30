@@ -137,7 +137,7 @@ async def upload_material(
         )
 
     if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail=" PDF ")
+        raise HTTPException(status_code=400, detail="仅支持 PDF 文件")
     try:
         content = await file.read()
     except Exception:

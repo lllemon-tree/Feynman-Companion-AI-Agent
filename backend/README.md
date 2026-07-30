@@ -58,6 +58,8 @@ LLM_PROVIDER=mock
 - `GET /api/v1/feynman/session/{session_id}`
 - `GET /api/v1/feynman/sessions`
 - `GET /api/v1/feynman/sessions/{session_id}`
+- `GET /api/v1/reports?page=1&page_size=20`
+- `GET /api/v1/reports/{report_id}`
 
 Request:
 
@@ -86,9 +88,15 @@ all branches -> persist_session -> END
 ```
 
 `retrieve` merges the knowledge point's fixed-page chunks with up to three
-single-material RAG chunks. Until the Chroma implementation is connected, the
-default retriever returns no RAG chunks and the fixed-page context remains the
-fallback.
+single-material Chroma RAG chunks. The BGE embedding model is loaded lazily on
+the first real vector operation, so normal API startup does not load the model.
+
+For logged-in users, a `generate_report` response is also persisted to the
+`diagnostic_report` table. Dimensions scoring 6 or below are synchronized to
+the `knowledge_gap` table when that table is available. Repeating a completed
+session is idempotent and does not create duplicate reports or open gaps.
+Guest conversations still return the report to the frontend but are not
+persisted.
 
 See `docs/backend-api.md` for frontend integration details.
 

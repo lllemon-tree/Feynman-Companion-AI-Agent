@@ -20,9 +20,8 @@ class BGEEmbeddingFunction(EmbeddingFunction):
     给 Chroma 当作它的“文本转向量工具”。
     """
     def __init__(self, model_name: str = "BAAI/bge-large-zh-v1.5"):
-        # SentenceTransformer 会自动下载并加载模型（若本地不存在）
-        # 第一次运行会从网上拉取约 1.5GB 的模型权重文件
-        self.model = SentenceTransformer(model_name, local_files_only=True)
+        self.model_name = model_name
+        self._model = None
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -31,7 +30,10 @@ class BGEEmbeddingFunction(EmbeddingFunction):
         :return: 对应的二维浮点数向量列表
         """
         # normalize_embeddings=True 表示输出标准化的向量，便于后续计算余弦相似度
-        embeddings = self.model.encode(input, normalize_embeddings=True).tolist()
+        # 首次真正向量化时才加载模型，避免普通 API 启动和单元测试被阻塞。
+        if self._model is None:
+            self._model = SentenceTransformer(self.model_name)
+        embeddings = self._model.encode(input, normalize_embeddings=True).tolist()
         return embeddings
 
 

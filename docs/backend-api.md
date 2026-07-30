@@ -320,6 +320,96 @@ GET /api/v1/feynman/session/{session_id}
 | `kp_id` / `kp_name` | 当前会话绑定的知识点 |
 | `material_id` / `chapter_id` | 当前知识点所属教材和章节 |
 
+## 9. 历史诊断报告
+
+诊断报告接口只对登录用户开放，必须携带：
+
+```http
+Authorization: Bearer <token>
+```
+
+当登录用户的费曼对话返回 `next_action=generate_report` 后，后端会自动把
+四维报告写入 `diagnostic_report`。同一个 `session_id` 重复请求不会产生重复报告。
+游客仍能在当前对话看到报告，但不会写入历史报告和知识漏洞库。
+
+### 9.1 报告列表
+
+```http
+GET /api/v1/reports?page=1&page_size=20
+Authorization: Bearer <token>
+```
+
+- `page` 从 1 开始，默认 1。
+- `page_size` 默认 20，最大 100。
+- 数据按 `created_at` 倒序返回。
+- 列表中的 `dimensions` 只包含维度名和分数，适合渲染迷你评分图。
+
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "items": [
+      {
+        "report_id": "rpt-a1b2c3d4e5f6",
+        "kp_id": "kp-demo",
+        "kp_name": "Dijkstra 算法",
+        "material_name": "数据结构教材",
+        "total_score": 24,
+        "dimensions": [
+          {"name": "理解深度", "score": 4},
+          {"name": "表达完整性", "score": 6},
+          {"name": "逻辑连贯性", "score": 7},
+          {"name": "结构化能力", "score": 7}
+        ],
+        "gaps_identified": 2,
+        "created_at": "2026-07-28T10:30:00Z"
+      }
+    ],
+    "total": 1,
+    "page": 1,
+    "page_size": 20
+  }
+}
+```
+
+### 9.2 报告详情
+
+```http
+GET /api/v1/reports/{report_id}
+Authorization: Bearer <token>
+```
+
+详情中的 `dimensions_full` 包含每个维度的 `analysis` 和 `suggestion`，可直接
+传给报告抽屉组件。请求不存在或不属于当前用户的报告统一返回 HTTP 404，避免
+跨用户读取。
+
+```json
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "report_id": "rpt-a1b2c3d4e5f6",
+    "kp_id": "kp-demo",
+    "kp_name": "Dijkstra 算法",
+    "material_name": "数据结构教材",
+    "session_id": "demo-001",
+    "dimensions_full": [
+      {
+        "name": "理解深度",
+        "score": 4,
+        "analysis": "能描述步骤，但正确性依据仍不完整。",
+        "suggestion": "补充非负权条件和贪心选择成立的原因。"
+      }
+    ],
+    "total_score": 24,
+    "overall_comment": "当前已掌握基本流程，下一步需要补足原理解释。",
+    "gaps_identified": 2,
+    "created_at": "2026-07-28T10:30:00Z"
+  }
+}
+```
+
 ## 前端联调注意事项
 
 1. 同一轮对话必须复用同一个 `session_id` 和 `kp_id`。
@@ -330,3 +420,4 @@ GET /api/v1/feynman/session/{session_id}
 6. 切换知识点前必须调用 reset 或生成新的 `session_id`，否则后端返回 `session is already bound to another kp_id`。
 7. 若知识点不存在或已删除，chat 返回 `next_action=guide_topic`，前端应跳回知识点选择页。
 8. 前端请求拦截器只在本地存在 Token 时添加 `Authorization`；不要给游客发送空 Bearer Token。
+9. 历史报告 Tab 应调用 `/reports`，点击卡片后再按需调用 `/reports/{report_id}`；两个接口都不支持游客模式。
