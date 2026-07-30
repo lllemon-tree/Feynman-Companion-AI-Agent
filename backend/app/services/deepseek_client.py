@@ -65,15 +65,14 @@ class DeepSeekClient:
             raise RuntimeError("DeepSeek API key is not configured.")
 
         # ===== 调试：打印 Prompt 中是否包含 RAG 检索原文 =====
-        if "【教材相关原文参考" in user_prompt:
-            # 提取 RAG 段落的前 200 字
-            rag_start = user_prompt.find("【教材相关原文参考")
+        if "【单教材 RAG 补充原文" in system_prompt:
+            rag_start = system_prompt.find("【单教材 RAG 补充原文")
             print(f"\n{'='*60}")
-            print(f"📚 RAG 检索原文已注入 Prompt，段落预览:")
-            print(f"{user_prompt[rag_start:rag_start+300]}...")
+            print(f"📚 RAG 检索原文已注入 system_prompt:")
+            print(f"{system_prompt[rag_start:rag_start+300]}...")
             print(f"{'='*60}\n")
         else:
-            print(f"\n⚠️ 本轮对话未注入 RAG 检索原文\n")
+            print(f"\n⚠️ system_prompt 中未包含 RAG 补充原文\n")
         # =================================================
 
         payload = {
