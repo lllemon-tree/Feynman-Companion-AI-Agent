@@ -53,7 +53,8 @@ async function handleSubmit() {
   if (isLogin.value) {
     success = await authStore.login(username.value.trim(), password.value)
     if (success) {
-      router.push('/upload')
+      const redirect = router.currentRoute.value.query.redirect || '/upload'
+      router.push(redirect)
     }
   } else {
     success = await authStore.register(username.value.trim(), password.value)
@@ -61,7 +62,8 @@ async function handleSubmit() {
       // 注册成功后自动登录
       const loginSuccess = await authStore.login(username.value.trim(), password.value)
       if (loginSuccess) {
-        router.push('/upload')
+        const redirect = router.currentRoute.value.query.redirect || '/upload'
+        router.push(redirect)
       }
     }
   }

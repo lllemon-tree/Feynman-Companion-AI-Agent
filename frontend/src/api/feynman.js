@@ -18,16 +18,20 @@ import {
   MOCK_AUTH_REGISTER,
   MOCK_AUTH_CURRENT,
   MOCK_RAG_RETRIEVE,
-  MOCK_SESSIONS
+  MOCK_SESSIONS,
+  MOCK_USER_PROFILE,
+  MOCK_USER_PROFILE_EMPTY,
+  MOCK_USER_PROFILE_SAVE,
+  MOCK_GAPS,
+  MOCK_GAPS_STATS,
+  MOCK_GAP_UPDATE,
+  MOCK_REPORTS,
+  MOCK_REPORT_DETAIL
 } from './mockData'
 
 const LEGACY_USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
-const USE_FEYNMAN_MOCK = import.meta.env.VITE_USE_FEYNMAN_MOCK == null
-  ? LEGACY_USE_MOCK
-  : import.meta.env.VITE_USE_FEYNMAN_MOCK === 'true'
-const USE_MATERIAL_MOCK = import.meta.env.VITE_USE_MATERIAL_MOCK == null
-  ? LEGACY_USE_MOCK
-  : import.meta.env.VITE_USE_MATERIAL_MOCK === 'true'
+const USE_FEYNMAN_MOCK = String(import.meta.env.VITE_USE_FEYNMAN_MOCK).toLowerCase() === 'true'
+const USE_MATERIAL_MOCK = String(import.meta.env.VITE_USE_MATERIAL_MOCK).toLowerCase() === 'true'
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1'
 const API_TIMEOUT_MS = Number(import.meta.env.VITE_API_TIMEOUT_MS || 60000)
 
@@ -435,4 +439,128 @@ export async function getSessionDetail(sessionId) {
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// 学情画像模块API
+
+/**
+ * 获取当前用户学情
+ */
+export async function getUserProfile() {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    // 可通过 localStorage 判断是否为首次注册
+    const isFirstTime = localStorage.getItem('feynman_profile_setup_done') !== 'true'
+    return isFirstTime ? MOCK_USER_PROFILE_EMPTY.data : MOCK_USER_PROFILE.data
+  }
+  const data = await http.get('/user/profile')
+  return data?.data
+}
+
+/**
+ * 保存/更新学情
+ * @param {object} profileData - 学情数据
+ */
+export async function saveUserProfile(profileData) {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    localStorage.setItem('feynman_profile_setup_done', 'true')
+    return MOCK_USER_PROFILE_SAVE.data
+  }
+  const data = await http.post('/user/profile', profileData)
+  return data?.data
+}
+
+/**
+ * 更新学情（部分更新）
+ * @param {object} updates - 要更新的字段
+ */
+export async function updateUserProfile(updates) {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    return MOCK_USER_PROFILE_SAVE.data
+  }
+  const data = await http.patch('/user/profile', updates)
+  return data?.data
+}
+
+// 知识漏洞库模块API
+
+/**
+ * 获取知识漏洞列表
+ * @param {string} status - 可选，漏洞状态 (open/reviewing/resolved)
+ */
+export async function getGaps(status = null) {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(500)
+    let items = MOCK_GAPS.data.items
+    if (status) {
+      items = items.filter(g => g.status === status)
+    }
+    return {
+      items,
+      total: items.length,
+      page: 1,
+      page_size: 20
+    }
+  }
+  const params = status ? { status } : {}
+  const data = await http.get('/gaps', { params })
+  return data?.data
+}
+
+/**
+ * 更新漏洞状态
+ * @param {string} gapId - 漏洞ID
+ * @param {string} status - 新状态
+ */
+export async function updateGapStatus(gapId, status) {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(300)
+    return {
+      gap_id: gapId,
+      status
+    }
+  }
+  const data = await http.patch(`/gaps/${gapId}`, { status })
+  return data?.data
+}
+
+/**
+ * 获取漏洞统计数据
+ */
+export async function getGapsStats() {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(300)
+    return MOCK_GAPS_STATS.data
+  }
+  const data = await http.get('/gaps/stats')
+  return data?.data
+}
+
+// 诊断报告模块API
+
+/**
+ * 获取历史报告列表
+ */
+export async function getReports() {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    return MOCK_REPORTS.data
+  }
+  const data = await http.get('/reports')
+  return data?.data
+}
+
+/**
+ * 获取报告详情
+ * @param {string} reportId - 报告ID
+ */
+export async function getReportDetail(reportId) {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    return MOCK_REPORT_DETAIL.data
+  }
+  const data = await http.get(`/reports/${reportId}`)
+  return data?.data
 }
