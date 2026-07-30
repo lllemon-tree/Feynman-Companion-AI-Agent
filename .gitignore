@@ -18,18 +18,8 @@ __pycache__/
 feynman.db
 uploads/
 
-# Documentation
-docs/
-
-# Git
-.gitignore
-
 # Local secrets
 .env
 .env.local
 .env.*.local
 *.local
-.env.development
-.env.production
-frontend/.env
-frontend/.env.*
