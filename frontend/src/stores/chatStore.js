@@ -51,10 +51,17 @@ export const useChatStore = defineStore('chat', {
     },
 
     async bootstrap(kpId = null) {
+      const savedKpId = kpId || this.kpId
+      const savedKpName = this.kpName
       this.resetLocalState()
+      this.kpId = savedKpId || ''
+      this.kpName = savedKpName || ''
+      if (!this.kpId) {
+        this.pushMessage('system', '未指定知识点，请先选择知识点。')
+        return
+      }
       try {
-        const effectiveKpId = kpId || this.kpId
-        const greeting = await fetchGreeting(effectiveKpId)
+        const greeting = await fetchGreeting(this.kpId)
         if (greeting.kp_id) {
           this.kpId = greeting.kp_id
           this.kpName = greeting.kp_name || ''

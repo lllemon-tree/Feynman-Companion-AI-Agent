@@ -146,7 +146,7 @@ async function startFeynman() {
   const kp = selectedKp.value
   const material = materials.value.find(m => m.material_id === selectedMaterialId.value)
   const chapter = chapters.value.find(c => c.chapter_id === selectedChapterId.value)
-  const subjectLabel = subjects.find(s => s.value === selectedSubject.value)?.label || ''
+  const subjectLabel = subjects.value.find(s => s.value === selectedSubject.value)?.label || ''
 
   chatStore.setSubject(subjectLabel)
   chatStore.setMaterial(selectedMaterialId.value, material?.title || '')
