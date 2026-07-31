@@ -23,7 +23,9 @@ def create_db_and_tables():
     from backend.app.models.auth import GUEST_USER_ID, User, utc_now
     from backend.app.models.diagnostic_report import DiagnosticReport
     from backend.app.models.knowledge import Chapter, Chunk, KP, LearnSession, Material
-
+    from backend.app.models.user_profile import UserProfile
+    from backend.app.models.knowledge_gap import KnowledgeGap  
+    
     SQLModel.metadata.create_all(engine)
     with engine.begin() as connection:
         columns = {column["name"] for column in inspect(connection).get_columns("material")}
