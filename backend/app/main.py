@@ -4,15 +4,17 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+
 # 导入我们在 core/config.py 里定义的 get_settings() 函数，用于读取配置
 from backend.app.api.routes import router as api_router
 from backend.app.api.auth import router as auth_router
 from backend.app.core.config import get_settings
+from backend.app.api.knowledge_gap import router as knowledge_gap_router
 
 # 路由导入
 from backend.app.api.materials import router as material_router
 from backend.app.api.kp import router as kp_router
-
+from backend.app.api.user_profile import router as user_profile_router
 # 建表引擎导入
 from backend.app.core.database import create_db_and_tables
 
@@ -66,3 +68,5 @@ app.include_router(api_router, prefix="/api/v1")
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(material_router, prefix="/api/v1")
 app.include_router(kp_router, prefix="/api/v1")
+app.include_router(user_profile_router, prefix="/api/v1")
+app.include_router(knowledge_gap_router, prefix="/api/v1")
