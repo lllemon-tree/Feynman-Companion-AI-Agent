@@ -134,7 +134,6 @@ class FeynmanGraph:
         else:
             # 正常路径：返回 evaluate，graph 会先经过 retrieve 节点再进入 evaluate
             route = "evaluate"
-        print(f"🔵 _route_input: kp={knowledge_point.name if knowledge_point else 'None'}, follow_up={session.follow_up_count}/{self._max_follow_ups}, route={route}")
         return {"route": route}
 
     @staticmethod
@@ -204,9 +203,8 @@ class FeynmanGraph:
                 else RetrievedChunk.model_validate(chunk)
                 for chunk in raw_chunks
             ]
-            print(f"🔍 RAG _retrieve: material={knowledge_point.material_id}, query={request.user_input.strip()[:40]}..., source_chunks={len(knowledge_point.source_chunks)}, rag_chunks={len(rag_chunks)}")
         except Exception as e:
-            print(f"⚠️ RAG _retrieve failed: {type(e).__name__}: {e}")
+            print(f"⚠️ RAG retrieve failed: {type(e).__name__}: {e}")
             rag_chunks = []
 
         merged: list[RetrievedChunk] = []
@@ -216,7 +214,10 @@ class FeynmanGraph:
                 continue
             seen_ids.add(chunk.chunk_id)
             merged.append(chunk)
-        print(f"🔍 RAG merged: {len(merged)} total grounding chunks")
+        src_ids = [c.chunk_id for c in knowledge_point.source_chunks]
+        rag_ids = [c.chunk_id for c in rag_chunks]
+        print(f"📖 page grounding ({len(src_ids)}): {src_ids}")
+        print(f"🔍 RAG retrieval  ({len(rag_ids)}): {rag_ids}")
         return {"grounding_chunks": merged}
 
     async def _evaluate(self, state: FeynmanGraphState) -> FeynmanGraphState:

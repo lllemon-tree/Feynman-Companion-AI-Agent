@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
-import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail } from '@/api/feynman'
+import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects } from '@/api/feynman'
 import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
 import ReportDrawer from '@/components/ReportDrawer.vue'
 
@@ -22,6 +22,67 @@ const gaps = ref([])
 const gapStats = ref({})
 const activeGapStatus = ref('open')
 const loadingGaps = ref(false)
+const expandedKps = ref(new Set())
+
+function toggleKp(kpId) {
+  const next = new Set(expandedKps.value)
+  if (next.has(kpId)) {
+    next.delete(kpId)
+  } else {
+    next.add(kpId)
+  }
+  expandedKps.value = next
+}
+
+async function startReviewKp(group) {
+  if (group.dimensions.some(d => d.status === 'open')) {
+    for (const dim of group.dimensions) {
+      if (dim.status === 'open') await updateGapStatus(dim.gap_id, 'reviewing')
+    }
+  } else if (group.dimensions.every(d => d.status === 'resolved')) {
+    for (const dim of group.dimensions) {
+      await updateGapStatus(dim.gap_id, 'open')
+    }
+  } else {
+    for (const dim of group.dimensions) {
+      if (dim.status !== 'resolved') await updateGapStatus(dim.gap_id, 'resolved')
+    }
+  }
+  await loadGaps()
+}
+
+// 按 kp_id 分组，每张卡片代表一个 KP
+const groupedGaps = computed(() => {
+  const grouped = {}
+  for (const gap of gaps.value) {
+    if (!grouped[gap.kp_id]) {
+      grouped[gap.kp_id] = {
+        kp_id: gap.kp_id,
+        kp_name: gap.kp_name,
+        material_name: gap.material_name,
+        dimensions: [],
+        status: 'open',
+        created_at: gap.created_at
+      }
+    }
+    grouped[gap.kp_id].dimensions.push({
+      gap_id: gap.gap_id,
+      dimension: gap.dimension,
+      score: gap.score,
+      severity: gap.severity,
+      gap_description: gap.gap_description,
+      status: gap.status,
+      created_at: gap.created_at
+    })
+    if (gap.status === 'open' && grouped[gap.kp_id].status !== 'open') {
+      grouped[gap.kp_id].status = 'open'
+    }
+    if (grouped[gap.kp_id].created_at < gap.created_at) {
+      grouped[gap.kp_id].created_at = gap.created_at
+    }
+  }
+  return Object.values(grouped)
+})
 
 // 历史报告
 const reports = ref([])
@@ -172,31 +233,25 @@ async function viewReportDetail(report) {
 async function loadMaterials() {
   loadingMaterials.value = true
   try {
-    const USE_MOCK = import.meta.env.VITE_USE_MATERIAL_MOCK !== 'false'
-    
-    if (USE_MOCK) {
-      await delay(500)
-      materials.value = [
-        {
-          id: 'mat-demo',
-          name: '数据结构教材.pdf',
-          subject: '计算机',
-          chapters: 2,
-          kps: 3,
-          createdAt: '2026-07-20'
-        }
-      ]
-    } else {
-      const tree = await getKnowledgeTree('computer')
-      materials.value = tree.map(m => ({
-        id: m.material_id,
-        name: m.title + '.pdf',
-        subject: '计算机',
-        chapters: m.chapters.length,
-        kps: m.chapters.reduce((sum, ch) => sum + ch.knowledge_points.length, 0),
-        createdAt: '2026-07-20'
-      }))
+    const subjects = await fetchSubjects()
+    const allMaterials = []
+    for (const subject of subjects) {
+      try {
+        const tree = await getKnowledgeTree(subject)
+        const mapped = tree.map(m => ({
+          id: m.material_id,
+          name: (m.title || '未命名教材') + '.pdf',
+          subject: subject,
+          chapters: m.chapters?.length || 0,
+          kps: m.chapters?.reduce((sum, ch) => sum + (ch.knowledge_points?.length || 0), 0) || 0,
+          createdAt: m.created_at || ''
+        }))
+        allMaterials.push(...mapped)
+      } catch (e) {
+        // 单个学科加载失败不阻塞其他
+      }
     }
+    materials.value = allMaterials
   } catch (e) {
     materials.value = []
   } finally {
@@ -460,7 +515,7 @@ onMounted(() => {
         </div>
 
         <!-- 空状态 -->
-        <div v-else-if="gaps.length === 0" class="empty-state">
+        <div v-else-if="groupedGaps.length === 0" class="empty-state">
           <div class="empty-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <polyline points="22 11 18 11 15 21 9 3 6 11 2 11" />
@@ -472,57 +527,72 @@ onMounted(() => {
           </button>
         </div>
 
-        <!-- 漏洞列表 -->
+        <!-- 漏洞列表（按 KP 分组，折叠展开） -->
         <div v-else class="gaps-list">
           <div
-            v-for="gap in gaps"
-            :key="gap.gap_id"
+            v-for="group in groupedGaps"
+            :key="group.kp_id"
             class="gap-card"
+            :class="{ 'gap-card--expanded': expandedKps.has(group.kp_id) }"
           >
-            <div class="gap-header">
-              <span class="gap-kp-name">{{ gap.kp_name }}</span>
-              <span class="gap-dimension-tag" :class="getDimensionClass(gap.dimension)">
-                {{ gap.dimension }}
-              </span>
-            </div>
-            
-            <div class="gap-body">
-              <p class="gap-description">{{ gap.gap_description }}</p>
-              
-              <div class="gap-meta">
-                <div class="gap-score">
-                  <span class="score-current">{{ gap.score }}</span>
-                  <span class="score-total">/10</span>
-                </div>
-                <div class="gap-severity">
-                  <span v-for="i in 5" :key="i" class="star" :class="{ 'star--active': i <= gap.severity }">★</span>
-                </div>
-                <div class="gap-date">{{ formatDate(gap.created_at) }}</div>
+            <div class="gap-header" @click="toggleKp(group.kp_id)">
+              <div class="gap-kp-info">
+                <span class="gap-kp-name">{{ group.kp_name }}</span>
+                <span class="gap-material-name" v-if="group.material_name">{{ group.material_name }}</span>
+              </div>
+              <div class="gap-header-right">
+                <span class="gap-dim-count">{{ group.dimensions.length }} 个薄弱维度</span>
+                <span class="gap-chevron" :class="{ 'gap-chevron--open': expandedKps.has(group.kp_id) }">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
               </div>
             </div>
 
-            <div class="gap-actions">
-              <button 
-                v-if="gap.status === 'open'" 
-                class="action-btn action-btn--review"
-                @click="updateGapStatusAction(gap.gap_id, 'reviewing')"
+            <div v-if="expandedKps.has(group.kp_id)" class="gap-dimensions-grid">
+              <div
+                v-for="dim in group.dimensions"
+                :key="dim.gap_id"
+                class="gap-dim-row"
               >
-                开始复习
-              </button>
-              <button 
-                v-if="gap.status === 'reviewing'" 
-                class="action-btn action-btn--master"
-                @click="updateGapStatusAction(gap.gap_id, 'resolved')"
-              >
-                标记已掌握
-              </button>
-              <button 
-                v-if="gap.status === 'resolved'" 
-                class="action-btn action-btn--reopen"
-                @click="updateGapStatusAction(gap.gap_id, 'open')"
-              >
-                重新打开
-              </button>
+                <div class="dim-row-header">
+                  <span class="dim-tag" :class="getDimensionClass(dim.dimension)">{{ dim.dimension }}</span>
+                  <span class="dim-score-text">{{ dim.score }}<small>/10</small></span>
+                </div>
+                <div class="dim-progress">
+                  <div
+                    class="dim-fill"
+                    :style="{ width: (dim.score / 10 * 100) + '%' }"
+                    :class="getScoreClass(dim.score)"
+                  ></div>
+                </div>
+                <p class="dim-desc" v-if="dim.gap_description">{{ dim.gap_description }}</p>
+              </div>
+
+              <div class="gap-card-actions">
+                <button
+                  v-if="group.dimensions.some(d => d.status === 'open')"
+                  class="action-btn action-btn--review"
+                  @click.stop="startReviewKp(group)"
+                >
+                  开始复习
+                </button>
+                <button
+                  v-if="group.dimensions.every(d => d.status === 'resolved')"
+                  class="action-btn action-btn--reopen"
+                  @click.stop="startReviewKp(group)"
+                >
+                  重新打开
+                </button>
+                <button
+                  v-if="!group.dimensions.some(d => d.status === 'open') && !group.dimensions.every(d => d.status === 'resolved')"
+                  class="action-btn action-btn--master"
+                  @click.stop="startReviewKp(group)"
+                >
+                  全部标记已掌握
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1244,13 +1314,29 @@ export default {
   overflow: hidden;
 }
 
+.gap-card--expanded {
+  border-color: #2563EB;
+}
+
 .gap-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  justify-content: space-between;
+  padding: 14px 16px;
   background: #F8FAFC;
-  border-bottom: 1px solid #E2E8F0;
+  cursor: pointer;
+  user-select: none;
+  transition: background 150ms;
+}
+
+.gap-header:hover {
+  background: #F1F5F9;
+}
+
+.gap-kp-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .gap-kp-name {
@@ -1259,129 +1345,163 @@ export default {
   color: #1E293B;
 }
 
-.gap-dimension-tag {
+.gap-material-name {
+  font-size: 12px;
+  color: #64748B;
+}
+
+.gap-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.gap-dim-count {
+  font-size: 12px;
+  color: #64748B;
+}
+
+.gap-chevron {
+  display: flex;
+  align-items: center;
+  color: #94A3B8;
+  transition: transform 200ms ease;
+}
+
+.gap-chevron--open {
+  transform: rotate(180deg);
+}
+
+.gap-dimensions-grid {
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.gap-dim-row {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.gap-dim-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.dim-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.dim-tag {
   padding: 2px 8px;
   border-radius: 4px;
   font-size: 12px;
   font-weight: 500;
 }
 
-.gap-dimension-tag.dim-deep {
+.dim-tag.dim-deep {
   background: rgba(59, 130, 246, 0.1);
   color: #3B82F6;
 }
-
-.gap-dimension-tag.dim-complete {
+.dim-tag.dim-complete {
   background: rgba(16, 185, 129, 0.1);
   color: #10B981;
 }
-
-.gap-dimension-tag.dim-logic {
+.dim-tag.dim-logic {
   background: rgba(139, 92, 246, 0.1);
   color: #8B5CF6;
 }
-
-.gap-dimension-tag.dim-struct {
+.dim-tag.dim-struct {
   background: rgba(245, 158, 11, 0.1);
   color: #F59E0B;
 }
-
-.gap-dimension-tag.dim-proof {
+.dim-tag.dim-proof {
   background: rgba(239, 68, 68, 0.1);
   color: #EF4444;
 }
-
-.gap-body {
-  padding: 16px;
-}
-
-.gap-description {
-  margin: 0 0 12px;
-  font-size: 13px;
-  color: #475569;
-  line-height: 1.5;
-}
-
-.gap-meta {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.gap-score {
-  display: flex;
-  align-items: baseline;
-  gap: 2px;
-}
-
-.score-current {
-  font-size: 18px;
-  font-weight: 700;
-  color: #2563EB;
-}
-
-.score-total {
-  font-size: 12px;
-  color: #94A3B8;
-}
-
-.gap-severity {
-  display: flex;
-  gap: 2px;
-}
-
-.star {
-  color: #CBD5E1;
-  font-size: 14px;
-}
-
-.star--active {
-  color: #F59E0B;
-}
-
-.gap-date {
-  margin-left: auto;
-  font-size: 12px;
-  color: #94A3B8;
-}
-
-.gap-actions {
-  display: flex;
-  padding: 12px 16px;
-  border-top: 1px solid #F1F5F9;
-  gap: 8px;
-}
-
-.action-btn {
-  flex: 1;
-  justify-content: center;
-  padding: 8px 12px;
-  font-size: 13px;
-}
-
-.action-btn--review {
-  background: rgba(245, 158, 11, 0.1);
-  color: #D97706;
-}
-
-.action-btn--review:hover {
-  background: rgba(245, 158, 11, 0.2);
-}
-
-.action-btn--master {
-  background: rgba(16, 185, 129, 0.1);
-  color: #059669;
-}
-
-.action-btn--master:hover {
-  background: rgba(16, 185, 129, 0.2);
-}
-
-.action-btn--reopen {
+.dim-tag.dim-default {
   background: #F1F5F9;
   color: #64748B;
 }
 
+.dim-score-text {
+  font-size: 15px;
+  font-weight: 700;
+  color: #1E293B;
+}
+.dim-score-text small {
+  font-size: 11px;
+  color: #94A3B8;
+  font-weight: 400;
+}
+
+.dim-progress {
+  height: 5px;
+  background: #E2E8F0;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.dim-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 300ms ease;
+}
+.dim-fill.score-high { background: #10B981; }
+.dim-fill.score-mid  { background: #F59E0B; }
+.dim-fill.score-low  { background: #EF4444; }
+
+.dim-desc {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #64748B;
+  line-height: 1.4;
+}
+
+.gap-card-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #E2E8F0;
+}
+.gap-card-actions .action-btn {
+  flex: 1;
+  justify-content: center;
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+.action-btn {
+  flex: none;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 150ms;
+}
+.action-btn--review {
+  background: rgba(245, 158, 11, 0.1);
+  color: #D97706;
+}
+.action-btn--review:hover {
+  background: rgba(245, 158, 11, 0.2);
+}
+.action-btn--master {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+.action-btn--master:hover {
+  background: rgba(16, 185, 129, 0.2);
+}
+.action-btn--reopen {
+  background: #F1F5F9;
+  color: #64748B;
+}
 .action-btn--reopen:hover {
   background: #E2E8F0;
 }
