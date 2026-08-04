@@ -125,6 +125,11 @@ const gapStatusTabs = [
 const isLoggedIn = computed(() => authStore.isLoggedIn)
 const username = computed(() => authStore.username)
 
+const trendMaxScore = computed(() => {
+  if (!userStats.value?.recent_trend?.length) return 40
+  return Math.max(...userStats.value.recent_trend.map(t => t.total_score), 1)
+})
+
 async function loadUserProfile() {
   if (!isLoggedIn.value) return
   loading.value = true
@@ -484,6 +489,23 @@ onMounted(() => {
                   {{ score }}
                 </span>
                 <span v-if="dim === userStats.weakest_dimension" class="weakest-badge">最薄弱</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="userStats.recent_trend && userStats.recent_trend.length > 0" class="trend-section">
+            <span class="section-title">总分趋势</span>
+            <div class="trend-chart">
+              <div v-for="item in userStats.recent_trend" :key="item.date" class="trend-bar-col">
+                <div class="trend-bar-wrap">
+                  <div
+                    class="trend-bar"
+                    :style="{ height: (item.total_score / trendMaxScore * 100) + '%' }"
+                  >
+                    <span class="trend-bar-score">{{ item.total_score }}</span>
+                  </div>
+                </div>
+                <span class="trend-bar-date">{{ item.date.slice(5) }}</span>
               </div>
             </div>
           </div>
@@ -1170,7 +1192,7 @@ export default {
   position: sticky;
   top: 76px;
   align-self: flex-start;
-  max-height: calc(100vh - 100px);
+  min-height: calc(100vh - 76px);
   overflow-y: auto;
 }
 
@@ -1362,6 +1384,59 @@ export default {
   font-size: 11px;
   font-weight: 600;
   color: #EF4444;
+}
+
+/* 总分趋势图 */
+.trend-section {
+  background: #F8FAFC;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.trend-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  height: 100px;
+}
+
+.trend-bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.trend-bar-wrap {
+  width: 100%;
+  height: 70px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.trend-bar {
+  width: 60%;
+  min-height: 4px;
+  background: linear-gradient(180deg, #3B82F6 0%, #2563EB 100%);
+  border-radius: 4px 4px 0 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4px;
+  transition: height 400ms ease;
+}
+
+.trend-bar-score {
+  font-size: 11px;
+  font-weight: 600;
+  color: #FFFFFF;
+}
+
+.trend-bar-date {
+  font-size: 11px;
+  color: #6B7280;
 }
 
 /* 今日待复习按钮和列表 */

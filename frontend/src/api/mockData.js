@@ -67,6 +67,7 @@ export const MOCK_GENERATE_REPORT = {
           { rank: 1, dimension: '理解深度', kp_name: 'Dijkstra 算法', suggestion: '通过反证法深入理解贪心选择性质' }
         ]
       }
+    }
   }
 }
 
