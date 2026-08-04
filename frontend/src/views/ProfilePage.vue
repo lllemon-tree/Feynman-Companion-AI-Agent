@@ -435,85 +435,85 @@ onMounted(() => {
         </aside>
 
         <section class="profile-content">
-      <!-- 学情统计概览 -->
-      <div v-if="isLoggedIn" class="stats-card">
-        <div v-if="loadingUserStats" class="loading-state">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner">
-            <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
-          </svg>
-          <p>加载中...</p>
-        </div>
-
-        <div v-else-if="!userStats || userStats.total_kps_learned === 0" class="stats-empty">
-          <div class="empty-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-            </svg>
-          </div>
-          <p class="empty-title">尚未开始学习</p>
-          <p class="empty-desc">去选择一个知识点开始吧</p>
-          <button class="start-btn" @click="router.push('/select')">
-            开始学习
-          </button>
-        </div>
-
-        <div v-else class="stats-content">
-          <div class="stats-grid">
-            <div class="stat-item">
-              <span class="stat-value">{{ userStats.total_kps_learned }}</span>
-              <span class="stat-label">已学习知识点</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ userStats.total_sessions }}</span>
-              <span class="stat-label">总对话次数</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ userStats.avg_total_score }}</span>
-              <span class="stat-label">平均得分</span>
-            </div>
-          </div>
-
-          <div class="dimension-avg-section">
-            <span class="section-title">四维度平均分</span>
-            <div class="dimension-bars">
-              <div v-for="(score, dim) in userStats.dimension_avg" :key="dim" class="dim-bar-row">
-                <span class="dim-label">{{ dim }}</span>
-                <div class="dim-progress-mini">
-                  <div
-                    class="dim-fill-mini"
-                    :style="{ width: (score / 10 * 100) + '%' }"
-                    :class="{ 'dim-weakest': dim === userStats.weakest_dimension }"
-                  ></div>
-                </div>
-                <span class="dim-score-mini" :class="{ 'score-weakest': dim === userStats.weakest_dimension }">
-                  {{ score }}
-                </span>
-                <span v-if="dim === userStats.weakest_dimension" class="weakest-badge">最薄弱</span>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="userStats.recent_trend && userStats.recent_trend.length > 0" class="trend-section">
-            <span class="section-title">总分趋势</span>
-            <div class="trend-chart">
-              <div v-for="item in userStats.recent_trend" :key="item.date" class="trend-bar-col">
-                <div class="trend-bar-wrap">
-                  <div
-                    class="trend-bar"
-                    :style="{ height: (item.total_score / trendMaxScore * 100) + '%' }"
-                  >
-                    <span class="trend-bar-score">{{ item.total_score }}</span>
-                  </div>
-                </div>
-                <span class="trend-bar-date">{{ item.date.slice(5) }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- 学情档案 Tab -->
       <div v-if="activeTab === 'profile'" class="tab-content">
+        <!-- 学情统计概览 -->
+        <div v-if="isLoggedIn" class="stats-card">
+          <div v-if="loadingUserStats" class="loading-state">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner">
+              <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
+            </svg>
+            <p>加载中...</p>
+          </div>
+
+          <div v-else-if="!userStats || userStats.total_kps_learned === 0" class="stats-empty">
+            <div class="empty-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              </svg>
+            </div>
+            <p class="empty-title">尚未开始学习</p>
+            <p class="empty-desc">去选择一个知识点开始吧</p>
+            <button class="start-btn" @click="router.push('/select')">
+              开始学习
+            </button>
+          </div>
+
+          <div v-else class="stats-content">
+            <div class="stats-grid">
+              <div class="stat-item">
+                <span class="stat-value">{{ userStats.total_kps_learned }}</span>
+                <span class="stat-label">已学习知识点</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value">{{ userStats.total_sessions }}</span>
+                <span class="stat-label">总对话次数</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-value">{{ userStats.avg_total_score }}</span>
+                <span class="stat-label">平均得分</span>
+              </div>
+            </div>
+
+            <div class="dimension-avg-section">
+              <span class="section-title">四维度平均分</span>
+              <div class="dimension-bars">
+                <div v-for="(score, dim) in userStats.dimension_avg" :key="dim" class="dim-bar-row">
+                  <span class="dim-label">{{ dim }}</span>
+                  <div class="dim-progress-mini">
+                    <div
+                      class="dim-fill-mini"
+                      :style="{ width: (score / 10 * 100) + '%' }"
+                      :class="{ 'dim-weakest': dim === userStats.weakest_dimension }"
+                    ></div>
+                  </div>
+                  <span class="dim-score-mini" :class="{ 'score-weakest': dim === userStats.weakest_dimension }">
+                    {{ score }}
+                  </span>
+                  <span v-if="dim === userStats.weakest_dimension" class="weakest-badge">最薄弱</span>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="userStats.recent_trend && userStats.recent_trend.length > 0" class="trend-section">
+              <span class="section-title">总分趋势</span>
+              <div class="trend-chart">
+                <div v-for="item in userStats.recent_trend" :key="item.date" class="trend-bar-col">
+                  <div class="trend-bar-wrap">
+                    <div
+                      class="trend-bar"
+                      :style="{ height: (item.total_score / trendMaxScore * 100) + '%' }"
+                    >
+                      <span class="trend-bar-score">{{ item.total_score }}</span>
+                    </div>
+                  </div>
+                  <span class="trend-bar-date">{{ item.date.slice(5) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div v-if="loading" class="loading-state">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner">
             <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
