@@ -30,7 +30,7 @@ const formData = reactive({
 })
 
 const subjects = ['计算机', '政治', '数学', '英语', '专业课一', '专业课二', '其他']
-const subCategories = ['统考408', '自命题']
+const subCategories = ['408统考', '自命题']
 const stages = ['基础', '强化', '冲刺']
 const examTypes = ['应届', '二战', '在职']
 const painPoints = ['概念理解困难', '输出薄弱', '知识碎片化', '盲目刷题', '自律性差']

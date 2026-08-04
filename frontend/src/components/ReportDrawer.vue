@@ -72,6 +72,53 @@ onBeforeUnmount(() => {
                 </div>
               </div>
             </div>
+
+            <div v-if="report.review_plan" class="divider-line"></div>
+
+            <div v-if="report.review_plan" class="review-plan-wrap">
+              <span class="sub-title-sm">📋 复习建议</span>
+              <div class="review-plan-content">
+                <!-- 教材重读指引 -->
+                <div class="review-item" v-if="report.review_plan.reread_guide && report.review_plan.reread_guide.length > 0">
+                  <span class="review-label">教材重读指引</span>
+                  <div class="reread-list">
+                    <div v-for="item in report.review_plan.reread_guide" :key="item.priority" class="reread-card">
+                      <div class="reread-header">
+                        <span class="reread-priority">优先级 {{ item.priority }}</span>
+                        <span class="reread-material">{{ item.material_name }}</span>
+                      </div>
+                      <div class="reread-page">{{ item.page_hint }}</div>
+                      <div class="reread-focus">重点关注：{{ item.focus }}</div>
+                      <div class="reread-reason">{{ item.reason }}</div>
+                    </div>
+                  </div>
+                </div>
+                <!-- 同类知识点推荐 -->
+                <div class="review-item" v-if="report.review_plan.related_kps && report.review_plan.related_kps.length > 0">
+                  <span class="review-label">同类知识点推荐</span>
+                  <div class="related-kps">
+                    <span v-for="kp in report.review_plan.related_kps" :key="kp.kp_id" class="kp-tag">
+                      <span class="kp-name">{{ kp.kp_name }}</span>
+                      <span class="kp-relation">{{ kp.relation }}</span>
+                    </span>
+                  </div>
+                </div>
+                <!-- 学习优先级排序 -->
+                <div class="review-item" v-if="report.review_plan.priority_order && report.review_plan.priority_order.length > 0">
+                  <span class="review-label">学习优先级排序</span>
+                  <div class="priority-list">
+                    <div v-for="item in report.review_plan.priority_order" :key="item.rank" class="priority-item">
+                      <span class="priority-num">{{ item.rank }}</span>
+                      <div class="priority-info">
+                        <span class="priority-dim">{{ item.dimension }}</span>
+                        <span class="priority-kp">{{ item.kp_name }}</span>
+                        <span class="priority-suggestion">{{ item.suggestion }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-else class="modal-body">
@@ -256,6 +303,153 @@ onBeforeUnmount(() => {
   color: #6B7280;
   padding-left: 11.25px;
   border-left: 2px solid #DBEAFE;
+}
+
+.review-plan-wrap {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.review-plan-content {
+  margin-top: 11.25px;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+.review-item {
+  box-sizing: border-box;
+  padding: 13.5px 15px;
+  background: #F9FAFB;
+  border-radius: 13.375px;
+}
+.review-label {
+  display: block;
+  font-family: 'Noto Sans SC', sans-serif;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: #1A1D23;
+  margin-bottom: 7.5px;
+}
+.review-text {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 13.125px;
+  line-height: 20px;
+  color: #4B5563;
+  margin: 0;
+}
+.reread-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7.5px;
+}
+.reread-card {
+  padding: 7.5px 11.25px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 9px;
+}
+.reread-header {
+  display: flex;
+  align-items: center;
+  gap: 7.5px;
+  margin-bottom: 4px;
+}
+.reread-priority {
+  font-size: 11px;
+  font-weight: 600;
+  color: #2563EB;
+  background: rgba(37, 99, 235, 0.1);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+.reread-material {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1A1D23;
+}
+.reread-page {
+  font-size: 12px;
+  color: #6B7280;
+  margin-bottom: 3px;
+}
+.reread-focus {
+  font-size: 12px;
+  color: #4B5563;
+  margin-bottom: 3px;
+}
+.reread-reason {
+  font-size: 11px;
+  color: #6B7280;
+  padding-left: 7.5px;
+  border-left: 2px solid #DBEAFE;
+}
+.related-kps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7.5px;
+}
+.kp-tag {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 11.25px;
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 9px;
+}
+.kp-name {
+  font-family: 'Noto Sans SC', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  color: #2563EB;
+}
+.kp-relation {
+  font-size: 11px;
+  color: #6B7280;
+}
+.priority-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7.5px;
+}
+.priority-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 7.5px;
+  padding: 7.5px 11.25px;
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 9px;
+}
+.priority-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  background: #2563EB;
+  color: #FFFFFF;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+}
+.priority-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.priority-dim {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1A1D23;
+}
+.priority-kp {
+  font-size: 11px;
+  color: #6B7280;
+}
+.priority-suggestion {
+  font-size: 11px;
+  color: #4B5563;
 }
 
 .drawer-enter-from,

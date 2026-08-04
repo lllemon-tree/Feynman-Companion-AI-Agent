@@ -2,7 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
-import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects } from '@/api/feynman'
+import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats } from '@/api/feynman'
 import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
 import ReportDrawer from '@/components/ReportDrawer.vue'
 
@@ -23,6 +23,13 @@ const gapStats = ref({})
 const activeGapStatus = ref('open')
 const loadingGaps = ref(false)
 const expandedKps = ref(new Set())
+const reviewDueGaps = ref([])
+const showReviewDue = ref(false)
+const loadingReviewDue = ref(false)
+
+// 学情统计
+const userStats = ref(null)
+const loadingUserStats = ref(false)
 
 function toggleKp(kpId) {
   const next = new Set(expandedKps.value)
@@ -146,6 +153,33 @@ async function loadGaps() {
     gapStats.value = {}
   } finally {
     loadingGaps.value = false
+  }
+}
+
+async function loadReviewDueGaps() {
+  if (!isLoggedIn.value) return
+  loadingReviewDue.value = true
+  try {
+    const data = await getReviewDueGaps()
+    reviewDueGaps.value = data.items || []
+    showReviewDue.value = true
+  } catch (e) {
+    reviewDueGaps.value = []
+  } finally {
+    loadingReviewDue.value = false
+  }
+}
+
+async function loadUserStats() {
+  if (!isLoggedIn.value) return
+  loadingUserStats.value = true
+  try {
+    const data = await getUserStats()
+    userStats.value = data
+  } catch (e) {
+    userStats.value = null
+  } finally {
+    loadingUserStats.value = false
   }
 }
 
@@ -309,6 +343,8 @@ function delay(ms) {
 }
 
 onMounted(() => {
+  // 加载学情统计数据
+  loadUserStats()
   // 根据当前tab加载数据
   if (activeTab.value === 'profile') {
     loadUserProfile()
@@ -338,8 +374,10 @@ onMounted(() => {
     </header>
 
     <main class="profile-main">
-      <!-- 用户信息卡片 -->
-      <div class="user-card">
+      <div class="profile-layout">
+        <aside class="profile-sidebar">
+          <!-- 用户信息卡片 -->
+          <div class="user-card">
         <div class="user-avatar-large">
           <span v-if="username" class="avatar-letter">{{ username.charAt(0).toUpperCase() }}</span>
           <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -388,6 +426,68 @@ onMounted(() => {
           </svg>
           <span>{{ tab.label }}</span>
         </button>
+      </div>
+        </aside>
+
+        <section class="profile-content">
+      <!-- 学情统计概览 -->
+      <div v-if="isLoggedIn" class="stats-card">
+        <div v-if="loadingUserStats" class="loading-state">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner">
+            <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
+          </svg>
+          <p>加载中...</p>
+        </div>
+
+        <div v-else-if="!userStats || userStats.total_kps_learned === 0" class="stats-empty">
+          <div class="empty-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+          </div>
+          <p class="empty-title">尚未开始学习</p>
+          <p class="empty-desc">去选择一个知识点开始吧</p>
+          <button class="start-btn" @click="router.push('/select')">
+            开始学习
+          </button>
+        </div>
+
+        <div v-else class="stats-content">
+          <div class="stats-grid">
+            <div class="stat-item">
+              <span class="stat-value">{{ userStats.total_kps_learned }}</span>
+              <span class="stat-label">已学习知识点</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">{{ userStats.total_sessions }}</span>
+              <span class="stat-label">总对话次数</span>
+            </div>
+            <div class="stat-item">
+              <span class="stat-value">{{ userStats.avg_total_score }}</span>
+              <span class="stat-label">平均得分</span>
+            </div>
+          </div>
+
+          <div class="dimension-avg-section">
+            <span class="section-title">四维度平均分</span>
+            <div class="dimension-bars">
+              <div v-for="(score, dim) in userStats.dimension_avg" :key="dim" class="dim-bar-row">
+                <span class="dim-label">{{ dim }}</span>
+                <div class="dim-progress-mini">
+                  <div
+                    class="dim-fill-mini"
+                    :style="{ width: (score / 10 * 100) + '%' }"
+                    :class="{ 'dim-weakest': dim === userStats.weakest_dimension }"
+                  ></div>
+                </div>
+                <span class="dim-score-mini" :class="{ 'score-weakest': dim === userStats.weakest_dimension }">
+                  {{ score }}
+                </span>
+                <span v-if="dim === userStats.weakest_dimension" class="weakest-badge">最薄弱</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- 学情档案 Tab -->
@@ -478,6 +578,62 @@ onMounted(() => {
 
       <!-- 知识漏洞 Tab -->
       <div v-if="activeTab === 'gaps'" class="tab-content">
+        <!-- 今日待复习按钮 -->
+        <button v-if="!showReviewDue" class="review-due-btn" @click="loadReviewDueGaps">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          <span>🔔 今日待复习</span>
+          <span v-if="reviewDueGaps.length > 0" class="review-badge">{{ reviewDueGaps.length }}</span>
+        </button>
+
+        <!-- 今日待复习列表 -->
+        <div v-if="showReviewDue" class="review-due-list">
+          <div class="review-due-header">
+            <span class="review-due-title">🔔 今日待复习</span>
+            <button class="close-review-btn" @click="showReviewDue = false">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+
+          <div v-if="loadingReviewDue" class="loading-state">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner">
+              <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
+            </svg>
+            <p>加载中...</p>
+          </div>
+
+          <div v-else-if="reviewDueGaps.length === 0" class="empty-state">
+            <div class="empty-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <polyline points="22 11 18 11 15 21 9 3 6 11 2 11" />
+              </svg>
+            </div>
+            <p>今日暂无待复习的漏洞</p>
+          </div>
+
+          <div v-else class="review-gaps-grid">
+            <div v-for="gap in reviewDueGaps" :key="gap.gap_id" class="review-gap-card">
+              <div class="review-gap-header">
+                <span class="review-gap-kp">{{ gap.kp_name }}</span>
+                <span class="review-gap-dim" :class="getDimensionClass(gap.dimension)">{{ gap.dimension }}</span>
+              </div>
+              <div class="review-gap-score">
+                <span class="review-score-value">{{ gap.score }}</span>
+                <span class="review-score-max">/ 10</span>
+              </div>
+              <p class="review-gap-desc">{{ gap.gap_description }}</p>
+              <button class="review-action-btn" @click="startReviewKp({ kp_id: gap.kp_id, dimensions: [gap] })">
+                开始复习
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- 状态筛选 Tab -->
         <div class="gap-status-tabs">
           <button
@@ -814,6 +970,8 @@ onMounted(() => {
           </div>
         </div>
       </div>
+        </section>
+      </div>
     </main>
 
     <!-- 学情设置弹窗 -->
@@ -990,10 +1148,37 @@ export default {
 
 .profile-main {
   flex: 1;
-  padding: 24px 16px;
-  max-width: 600px;
-  margin: 0 auto;
+  padding: 24px 24px;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.profile-layout {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+.profile-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 76px;
+  align-self: flex-start;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.profile-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 920px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -1002,12 +1187,14 @@ export default {
 /* 用户卡片 */
 .user-card {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  padding: 20px;
+  gap: 12px;
+  padding: 20px 16px;
   background: #FFFFFF;
   border-radius: 16px;
   border: 1px solid #E2E8F0;
+  text-align: center;
 }
 
 .user-avatar-large {
@@ -1030,6 +1217,7 @@ export default {
 .user-info {
   flex: 1;
   min-width: 0;
+  text-align: center;
 }
 
 .user-name {
@@ -1059,37 +1247,330 @@ export default {
   background: #1D4ED8;
 }
 
+/* 学情统计卡片 */
+.stats-card {
+  background: #FFFFFF;
+  border-radius: 16px;
+  border: 1px solid #E2E8F0;
+  overflow: hidden;
+}
+
+.stats-empty {
+  padding: 40px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.stats-content {
+  padding: 20px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #2563EB;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: #64748B;
+}
+
+.dimension-avg-section {
+  background: #F8FAFC;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.section-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 12px;
+}
+
+.dimension-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dim-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dim-label {
+  width: 80px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.dim-progress-mini {
+  flex: 1;
+  height: 6px;
+  background: #E2E8F0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.dim-fill-mini {
+  height: 100%;
+  background: #2563EB;
+  border-radius: 3px;
+  transition: width 300ms ease;
+}
+
+.dim-fill-mini.dim-weakest {
+  background: #EF4444;
+}
+
+.dim-score-mini {
+  width: 24px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.dim-score-mini.score-weakest {
+  color: #EF4444;
+}
+
+.weakest-badge {
+  padding: 2px 8px;
+  background: rgba(239, 68, 68, 0.1);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #EF4444;
+}
+
+/* 今日待复习按钮和列表 */
+.review-due-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  border: 1px solid #F59E0B;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #92400E;
+  cursor: pointer;
+  transition: all 150ms;
+  margin-bottom: 12px;
+}
+
+.review-due-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+
+.review-badge {
+  margin-left: auto;
+  padding: 2px 10px;
+  background: #F59E0B;
+  color: #FFFFFF;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-due-list {
+  background: #FFFFFF;
+  border-radius: 12px;
+  border: 1px solid #F59E0B;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.review-due-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+  border-bottom: 1px solid #FCD34D;
+}
+
+.review-due-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #92400E;
+}
+
+.close-review-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.5);
+  border: none;
+  border-radius: 50%;
+  color: #92400E;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.close-review-btn:hover {
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.review-gaps-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+.review-gap-card {
+  padding: 16px;
+  background: #F8FAFC;
+  border-radius: 10px;
+  border: 1px solid #E2E8F0;
+}
+
+.review-gap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.review-gap-kp {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1E293B;
+}
+
+.review-gap-dim {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.review-gap-dim.dim-deep {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+}
+.review-gap-dim.dim-complete {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10B981;
+}
+.review-gap-dim.dim-logic {
+  background: rgba(139, 92, 246, 0.1);
+  color: #8B5CF6;
+}
+.review-gap-dim.dim-struct {
+  background: rgba(245, 158, 11, 0.1);
+  color: #F59E0B;
+}
+.review-gap-dim.dim-proof {
+  background: rgba(239, 68, 68, 0.1);
+  color: #EF4444;
+}
+.review-gap-dim.dim-default {
+  background: #F1F5F9;
+  color: #64748B;
+}
+
+.review-gap-score {
+  margin-bottom: 8px;
+}
+
+.review-score-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #EF4444;
+}
+
+.review-score-max {
+  font-size: 12px;
+  color: #94A3B8;
+}
+
+.review-gap-desc {
+  font-size: 13px;
+  color: #64748B;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+
+.review-action-btn {
+  width: 100%;
+  padding: 8px 16px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid #F59E0B;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #D97706;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.review-action-btn:hover {
+  background: rgba(245, 158, 11, 0.2);
+}
+
 /* Tab 容器 */
 .tabs-container {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   background: #FFFFFF;
-  padding: 6px;
+  padding: 8px;
   border-radius: 12px;
   border: 1px solid #E2E8F0;
 }
 
 .tab-btn {
-  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 10px 8px;
-  border-radius: 10px;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
   color: #64748B;
+  text-align: left;
+  border-left: 3px solid transparent;
   transition: all 150ms;
 }
 
 .tab-btn--active {
-  background: #2563EB;
-  color: #FFFFFF;
+  background: rgba(37, 99, 235, 0.1);
+  color: #2563EB;
+  border-left: 3px solid #2563EB;
 }
 
 .tab-btn--active svg {
-  color: #FFFFFF;
+  color: #2563EB;
 }
 
 .tab-content {
@@ -1964,5 +2445,16 @@ export default {
 
 .session-drawer-footer .btn-secondary:hover {
   background: #E2E8F0;
+}
+
+/* 响应式：小屏幕回退为上下布局 */
+@media (max-width: 767px) {
+  .profile-layout {
+    flex-direction: column;
+  }
+
+  .profile-sidebar {
+    width: 100%;
+  }
 }
 </style>

@@ -49,8 +49,24 @@ export const MOCK_GENERATE_REPORT = {
         }
       ],
       overall_comment:
-        '整体表现优秀！你对 Dijkstra 算法的核心机制掌握扎实，表达清晰有条理。主要提升点在于贪心策略正确性的证明逻辑，建议通过反证法深入理解非负权前提的必要性。继续保持，相信下次会更出色！'
-    }
+        '整体表现优秀！你对 Dijkstra 算法的核心机制掌握扎实，表达清晰有条理。主要提升点在于贪心策略正确性的证明逻辑，建议通过反证法深入理解非负权前提的必要性。继续保持，相信下次会更出色！',
+      review_plan: {
+        reread_guide: [
+          {
+            priority: 1,
+            material_name: '数据结构教材',
+            page_hint: '第 3 章 第 30-33 页',
+            focus: '贪心策略的正确性证明——反证法推导过程',
+            reason: '理解深度得分偏低（9/10），建议进一步巩固非负权前提的必要性'
+          }
+        ],
+        related_kps: [
+          { kp_id: 'kp-mst', kp_name: '最小生成树', relation: '同属图论核心算法，对比理解贪心策略在不同问题中的应用' }
+        ],
+        priority_order: [
+          { rank: 1, dimension: '理解深度', kp_name: 'Dijkstra 算法', suggestion: '通过反证法深入理解贪心选择性质' }
+        ]
+      }
   }
 }
 
@@ -536,7 +552,84 @@ export const MOCK_REPORT_DETAIL = {
     ],
     total_score: 24,
     overall_comment: '本次讲解体现了对Dijkstra算法的基础了解，但在原理深度和表达完整性方面还有提升空间。建议重点攻克贪心策略的正确性证明，并在讲解时更加注重前提条件和适用范围的说明。',
+    review_plan: {
+      reread_guide: [
+        {
+          priority: 1,
+          material_name: '数据结构教材',
+          page_hint: '第 3 章 第 30-33 页',
+          focus: '贪心策略的正确性证明——反证法推导过程',
+          reason: '理解深度得分偏低（4/10），未能解释为何非负权边是前提条件'
+        }
+      ],
+      related_kps: [
+        { kp_id: 'kp-mst', kp_name: '最小生成树', relation: '同属图论核心算法，对比理解贪心策略在不同问题中的应用' },
+        { kp_id: 'kp-topo', kp_name: '拓扑排序', relation: '有向无环图相关，对比DAG与一般图的区别' }
+      ],
+      priority_order: [
+        { rank: 1, dimension: '理解深度', kp_name: 'Dijkstra 算法', suggestion: '优先复习贪心策略正确性证明' },
+        { rank: 2, dimension: '表达完整性', kp_name: 'Dijkstra 算法', suggestion: '补充非负权前提条件的说明' }
+      ]
+    },
     gaps_identified: 2,
     created_at: '2026-07-28T10:30:00'
+  }
+}
+
+// 今日待复习漏洞Mock数据
+export const MOCK_REVIEW_DUE_GAPS = {
+  code: 200,
+  msg: 'success',
+  data: {
+    items: [
+      {
+        gap_id: 'gap-review-1',
+        kp_id: 'kp-demo',
+        kp_name: 'Dijkstra 算法',
+        dimension: '理解深度',
+        score: 4,
+        severity: 4,
+        status: 'open',
+        gap_description: '能描述算法步骤，但无法解释贪心策略的正确性依赖非负权边的前提条件',
+        created_at: '2026-07-28T10:30:00'
+      },
+      {
+        gap_id: 'gap-review-2',
+        kp_id: 'kp-mst',
+        kp_name: '最小生成树',
+        dimension: '结构化能力',
+        score: 5,
+        severity: 4,
+        status: 'reviewing',
+        gap_description: 'Kruskal和Prim算法的使用场景区分不清晰',
+        created_at: '2026-07-27T14:20:00'
+      }
+    ],
+    total: 2,
+    page: 1,
+    page_size: 20
+  }
+}
+
+// 学情统计Mock数据
+export const MOCK_USER_STATS = {
+  code: 200,
+  msg: 'success',
+  data: {
+    total_kps_learned: 12,
+    total_sessions: 18,
+    avg_total_score: 28.5,
+    dimension_avg: {
+      '理解深度': 6.8,
+      '表达完整性': 7.2,
+      '逻辑连贯性': 7.5,
+      '结构化能力': 7.0
+    },
+    weakest_dimension: '理解深度',
+    recent_trend: [
+      { date: '2026-08-02', total_score: 26 },
+      { date: '2026-08-03', total_score: 30 },
+      { date: '2026-08-04', total_score: 32 }
+    ]
   }
 }
