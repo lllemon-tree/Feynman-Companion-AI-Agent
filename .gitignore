@@ -17,6 +17,7 @@ __pycache__/
 *.log
 feynman.db
 uploads/
+chroma_db/
 
 # Local secrets
 .env

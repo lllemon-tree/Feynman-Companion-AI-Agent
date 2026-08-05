@@ -4,7 +4,7 @@ from backend.app.models.feynman import FeynmanChatRequest, NextAction
 from backend.app.models.rag import RetrievedChunk
 from backend.app.services.feynman_service import FeynmanService
 from backend.app.services.mock_llm import MockLLMClient
-from backend.app.services.prompts import build_system_prompt
+from backend.app.services.prompt_builder import build_system_prompt
 from backend.app.services.session_store import InMemorySessionStore
 
 

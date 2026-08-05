@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field as PydanticField
 from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
-from backend.app.models.feynman import DimensionReport
+from backend.app.models.feynman import DimensionReport, ReviewPlan
 
 
 def utc_now() -> datetime:
@@ -31,6 +31,7 @@ class DiagnosticReport(SQLModel, table=True):
     total_score: int = Field(ge=0, le=40)
     overall_comment: Optional[str] = None
     gaps_identified: int = Field(default=0, ge=0, le=4)
+    review_plan: Optional[str] = None  # ReviewPlan 的 JSON 字符串，未生成时为 None
     created_at: datetime = Field(default_factory=utc_now)
 
 
@@ -67,6 +68,7 @@ class ReportDetailData(BaseModel):
     total_score: int = PydanticField(ge=0, le=40)
     overall_comment: Optional[str] = None
     gaps_identified: int = PydanticField(ge=0, le=4)
+    review_plan: Optional[ReviewPlan] = None  # 历史报告详情回看复习建议
     created_at: datetime
 
 

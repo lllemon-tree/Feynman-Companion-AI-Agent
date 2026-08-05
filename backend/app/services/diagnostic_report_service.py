@@ -26,7 +26,12 @@ from backend.app.models.diagnostic_report import (
     ReportListData,
     ReportListItem,
 )
-from backend.app.models.feynman import DimensionReport, FeynmanChatData, NextAction
+from backend.app.models.feynman import (
+    DimensionReport,
+    FeynmanChatData,
+    NextAction,
+    ReviewPlan,
+)
 from backend.app.models.knowledge import Material
 from backend.app.services.session_store import SessionState
 
@@ -241,6 +246,14 @@ class DiagnosticReportFinalizer:
                 total_score=sum(dimension.score for dimension in dimensions),
                 overall_comment=response.final_report.overall_comment,
                 gaps_identified=gaps_identified,
+                review_plan=(
+                    json.dumps(
+                        response.review_plan.model_dump(mode="json"),
+                        ensure_ascii=False,
+                    )
+                    if response.review_plan is not None
+                    else None
+                ),
             )
             db.add(report)
             db.commit()
@@ -307,6 +320,7 @@ def get_report_detail(
         total_score=record.total_score,
         overall_comment=record.overall_comment,
         gaps_identified=record.gaps_identified,
+        review_plan=_parse_review_plan(record.review_plan),
         created_at=record.created_at,
     )
 
@@ -333,6 +347,17 @@ def _parse_dimensions(value: str) -> list[DimensionReport]:
         DimensionReport.model_validate(item)
         for item in json.loads(value)
     ]
+
+
+def _parse_review_plan(value: Optional[str]) -> Optional[ReviewPlan]:
+    """把数据库里存的 review_plan JSON 字符串解析回 ReviewPlan 对象。"""
+    if not value:
+        return None
+    try:
+        return ReviewPlan.model_validate(json.loads(value))
+    except Exception:
+        # 数据损坏时降级为 None，不影响报告主体返回
+        return None
 
 
 def _timestamp_for(column, value: datetime):

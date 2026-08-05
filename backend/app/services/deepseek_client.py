@@ -13,10 +13,13 @@ from backend.app.services.prompts import (
     RUBRIC_GENERATION_SYSTEM_PROMPT,
     build_kp_user_prompt,
     build_rubric_user_prompt,
+)
+from backend.app.services.prompt_builder import (
     build_system_prompt,
     build_user_prompt,
 )
-
+from backend.app.models.user_profile import UserProfileResponse 
+from typing import Optional 
 
 class DeepSeekClient:
     def __init__(self, settings: Settings) -> None:
@@ -30,12 +33,14 @@ class DeepSeekClient:
         max_follow_ups: int,
         knowledge_point: KnowledgePoint,
         grounding_chunks: Sequence[RetrievedChunk] = (),
+        profile: Optional[UserProfileResponse] = None,
     ) -> FeynmanChatData:
         parsed = await self._request_json(
             system_prompt=build_system_prompt(
                 kp_name=knowledge_point.name,
                 rubric=knowledge_point.rubric,
                 grounding_chunks=grounding_chunks,
+                profile=profile,
             ),
             user_prompt=build_user_prompt(
                 messages=messages,
@@ -64,15 +69,27 @@ class DeepSeekClient:
         if not self._settings.deepseek_configured:
             raise RuntimeError("DeepSeek API key is not configured.")
 
+        # ===== 调试：打印是否注入个性化教学策略（痛点/阶段）=====
+        if "【个性化教学策略" in system_prompt:
+            p_start = system_prompt.find("【个性化教学策略")
+            p_end = system_prompt.find("【后台判分基准事实")
+            segment = system_prompt[p_start:p_end] if p_end != -1 else system_prompt[p_start:p_start + 300]
+            print(f"\n{'='*60}")
+            print(f"个性化教学策略已注入:")
+            print(segment.strip())
+            print(f"{'='*60}\n")
+        else:
+            print(f"\n（当前无个性化策略注入：游客或未填写学情画像）\n")
+
         # ===== 调试：打印 Prompt 中是否包含 RAG 检索原文 =====
         if "【单教材 RAG 补充原文" in system_prompt:
             rag_start = system_prompt.find("【单教材 RAG 补充原文")
             print(f"\n{'='*60}")
-            print(f"📚 RAG 检索原文已注入 system_prompt:")
+            print(f"RAG 检索原文已注入 system_prompt:")
             print(f"{system_prompt[rag_start:rag_start+300]}...")
             print(f"{'='*60}\n")
         else:
-            print(f"\n⚠️ system_prompt 中未包含 RAG 补充原文\n")
+            print(f"\n（system_prompt 中未包含 RAG 补充原文）\n")
         # =================================================
 
         payload = {

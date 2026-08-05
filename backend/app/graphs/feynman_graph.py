@@ -13,7 +13,7 @@ from backend.app.services.kp_provider import (
 )
 from backend.app.services.rag_retriever import RAGRetriever
 from backend.app.services.session_store import SessionState
-
+from backend.app.models.user_profile import UserProfileResponse
 
 RouteName = Literal["kp_missing", "off_topic", "ineffective", "evaluate", "report"]
 
@@ -27,7 +27,7 @@ class FeynmanGraphState(TypedDict, total=False):
     provider: str
     fallback_used: bool
     grounding_chunks: list[RetrievedChunk]
-
+    user_profile: Optional[UserProfileResponse]
 
 class FeynmanGraph:
     def __init__(
@@ -38,6 +38,7 @@ class FeynmanGraph:
         max_follow_ups: int,
         primary_provider_name: str,
         rag_retriever: RAGRetriever,
+        profile_provider=None,
     ) -> None:
         self._llm_client = llm_client
         self._fallback_client = fallback_client
@@ -45,14 +46,16 @@ class FeynmanGraph:
         self._max_follow_ups = max_follow_ups
         self._primary_provider_name = primary_provider_name
         self._rag_retriever = rag_retriever
+        self._profile_provider = profile_provider
         self._graph = self._build_graph()
 
     async def run(
         self,
         request: FeynmanChatRequest,
         session: SessionState,
+        profile: Optional[UserProfileResponse] = None,
     ) -> FeynmanChatData:
-        result = await self._graph.ainvoke({"request": request, "session": session})
+        result = await self._graph.ainvoke({"request": request, "session": session, "user_profile": profile})
         return result["response"]
 
     def draw_mermaid(self) -> str:
@@ -100,6 +103,11 @@ class FeynmanGraph:
         request = state["request"]
         session = state["session"]
 
+        # 开场先加载用户画像（游客或无 provider 时返回 None，安全降级为默认 Prompt）
+        profile = None
+        if self._profile_provider is not None:
+            profile = self._profile_provider(session.user_id)
+
         if request.kp_id and session.kp_id and request.kp_id != session.kp_id and session.messages:
             raise ValueError("session is already bound to another kp_id; reset it before switching")
 
@@ -110,13 +118,13 @@ class FeynmanGraph:
             session.kp_name = None
             session.material_id = None
             session.chapter_id = None
-            return {"knowledge_point": None}
+            return {"knowledge_point": None, "user_profile": profile}
 
         session.kp_id = knowledge_point.kp_id
         session.kp_name = knowledge_point.name
         session.material_id = knowledge_point.material_id
         session.chapter_id = knowledge_point.chapter_id
-        return {"knowledge_point": knowledge_point}
+        return {"knowledge_point": knowledge_point, "user_profile": profile}
 
     def _route_input(self, state: FeynmanGraphState) -> FeynmanGraphState:
         session = state["session"]
@@ -224,6 +232,7 @@ class FeynmanGraph:
         session = state["session"]
         request = state["request"]
         knowledge_point = state["knowledge_point"]
+        profile = state.get("user_profile")
         assert knowledge_point is not None
         try:
             response = await self._llm_client.evaluate(
@@ -233,6 +242,7 @@ class FeynmanGraph:
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
                 grounding_chunks=state.get("grounding_chunks", []),
+                profile=profile,
             )
             response = _normalize_contract(response)
             return {
@@ -248,6 +258,7 @@ class FeynmanGraph:
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
                 grounding_chunks=state.get("grounding_chunks", []),
+                profile=profile,
             )
             response = _normalize_contract(response)
             return {"response": response, "provider": "mock", "fallback_used": True}
@@ -256,6 +267,7 @@ class FeynmanGraph:
         session = state["session"]
         request = state["request"]
         knowledge_point = state["knowledge_point"]
+        profile = state.get("user_profile")
         assert knowledge_point is not None
         try:
             response = await self._llm_client.evaluate(
@@ -265,6 +277,7 @@ class FeynmanGraph:
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
                 grounding_chunks=state.get("grounding_chunks", []),
+                profile=profile,
             )
             response = _normalize_contract(response)
             return {
@@ -280,6 +293,7 @@ class FeynmanGraph:
                 max_follow_ups=self._max_follow_ups,
                 knowledge_point=knowledge_point,
                 grounding_chunks=state.get("grounding_chunks", []),
+                profile=profile,
             )
             response = _normalize_contract(response)
             return {"response": response, "provider": "mock", "fallback_used": True}

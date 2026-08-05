@@ -1,5 +1,4 @@
-from typing import Sequence
-
+from typing import Any, Optional, Sequence
 from backend.app.models.feynman import (
     CardPreview,
     ChatMessage,
@@ -7,6 +6,9 @@ from backend.app.models.feynman import (
     FinalReport,
     FeynmanChatData,
     NextAction,
+    PriorityItem,
+    ReviewPlan,
+    ReviewPlanItem,
 )
 from backend.app.models.rag import RetrievedChunk
 from backend.app.services.kp_provider import KnowledgePoint
@@ -21,6 +23,7 @@ class MockLLMClient:
         max_follow_ups: int,
         knowledge_point: KnowledgePoint,
         grounding_chunks: Sequence[RetrievedChunk] = (),
+        profile: Optional[Any] = None,
     ) -> FeynmanChatData:
         text = _normalize(user_input)
         user_messages = [message.content for message in messages if message.role == "user"]
@@ -32,6 +35,7 @@ class MockLLMClient:
                 follow_up_count=follow_up_count,
                 max_follow_ups=max_follow_ups,
                 knowledge_point=knowledge_point,
+                profile=profile,
             )
 
         coverage = _coverage(all_text)
@@ -39,28 +43,33 @@ class MockLLMClient:
         if follow_up_count >= max_follow_ups or _is_complete(coverage):
             return _build_report(all_text, coverage, knowledge_point.name)
 
+        suffix = _pain_point_suffix(profile)  # 按痛点追加引导语
         if not coverage["non_negative"]:
             return FeynmanChatData(
                 next_action=NextAction.FOLLOW_UP,
-                reply_text="我听懂了一部分流程。不过如果图里出现负权边，这个方法还能保证正确吗？为什么？",
+                reply_text="我听懂了一部分流程。不过如果图里出现负权边，这个方法还能保证正确吗？为什么？"
+                + suffix,
             )
         if not coverage["greedy_choice"]:
             return FeynmanChatData(
                 next_action=NextAction.FOLLOW_UP,
-                reply_text="你提到了找最短路，但每一步到底应该选哪个点继续扩展？这个选择依据是什么？",
+                reply_text="你提到了找最短路，但每一步到底应该选哪个点继续扩展？这个选择依据是什么？"
+                + suffix,
             )
         if not coverage["relaxation"]:
             return FeynmanChatData(
                 next_action=NextAction.FOLLOW_UP,
-                reply_text="你说会更新距离，我有点没跟上：所谓“松弛”具体是在更新谁的距离？用什么规则更新？",
+                reply_text="你说会更新距离，我有点没跟上：所谓“松弛”具体是在更新谁的距离？用什么规则更新？"
+                + suffix,
             )
         if not coverage["proof"]:
             return FeynmanChatData(
                 next_action=NextAction.FOLLOW_UP,
-                reply_text="操作步骤我大概明白了，但为什么当前距离最小的未访问节点就可以确定为最短路了？",
+                reply_text="操作步骤我大概明白了，但为什么当前距离最小的未访问节点就可以确定为最短路了？"
+                + suffix,
             )
 
-        return _build_report(text, coverage, knowledge_point.name)
+        return _build_report(text, coverage, knowledge_point.name, profile=profile)
 
 
 def _evaluate_generic(
@@ -68,9 +77,10 @@ def _evaluate_generic(
     follow_up_count: int,
     max_follow_ups: int,
     knowledge_point: KnowledgePoint,
+    profile=None,
 ) -> FeynmanChatData:
     if follow_up_count >= max_follow_ups:
-        return _build_generic_report(text, knowledge_point.name)
+        return _build_generic_report(text, knowledge_point.name, profile=profile)
 
     dimension_keys = [
         "concept_prerequisite",
@@ -84,11 +94,12 @@ def _evaluate_generic(
         reply_text=(
             f"关于{knowledge_point.name}的“{dimension_name}”，你能再解释得具体一点吗？"
             "尽量说明条件、过程以及为什么成立。"
+            + _pain_point_suffix(profile)  # 按痛点追加引导语
         ),
     )
 
 
-def _build_generic_report(text: str, kp_name: str) -> FeynmanChatData:
+def _build_generic_report(text: str, kp_name: str, profile=None) -> FeynmanChatData:
     understanding = min(10, 3 + len(text) // 25)
     completeness = min(10, 3 + len(text) // 30)
     logic = min(10, 4 + len(text) // 40)
@@ -132,11 +143,66 @@ def _build_generic_report(text: str, kp_name: str) -> FeynmanChatData:
                 "核心机制和原理依据连成一条完整的解释链。"
             ),
         ),
+        review_plan=_build_mock_review_plan(dimensions, kp_name),
     )
 
 
 def _normalize(text: str) -> str:
     return text.lower().replace(" ", "")
+
+
+def _build_mock_review_plan(dimensions, kp_name: str) -> ReviewPlan:
+    """从四维评分生成复习计划：得分 <= 6 的维度进入重读指引与优先级排序。
+
+    Mock 降级时的简化版 review_plan，保证前端在 DeepSeek 不可用时
+    也能拿到复习建议结构，不阻塞联调。
+    """
+    low_score = [dim for dim in dimensions if dim.score <= 6]
+    if not low_score:
+        return ReviewPlan()  # 没有低分维度 → 空计划（安全默认）
+
+    reread_guide = [
+        ReviewPlanItem(
+            priority=idx + 1,
+            material_name="教材",
+            page_hint="对应知识点章节",
+            focus=dim.suggestion,
+            reason=f"{dim.name}维度得分偏低（{dim.score}/10）",
+        )
+        for idx, dim in enumerate(low_score)
+    ]
+    priority_order = [
+        PriorityItem(
+            rank=idx + 1,
+            dimension=dim.name,
+            kp_name=kp_name,
+            suggestion=dim.suggestion,
+        )
+        for idx, dim in enumerate(low_score)
+    ]
+    return ReviewPlan(
+        reread_guide=reread_guide,
+        related_kps=[],  # Mock 无同类知识点数据来源，留空
+        priority_order=priority_order,
+    )
+
+
+def _pain_point_suffix(profile) -> str:
+    """根据画像痛点，给追问话术追加一句引导语。
+
+    让 Mock 降级时也能体现用户痛点，而不是一套话术通吃所有人。
+    """
+    if not profile or not profile.pain_points:
+        return ""
+    if "输出薄弱" in profile.pain_points:
+        return " 不用着急一次讲完整，先想到多少说多少，我们一步步来。"
+    if "概念理解困难" in profile.pain_points:
+        return " 你可以试着用生活里的例子来解释一下。"
+    if "知识碎片化" in profile.pain_points:
+        return " 顺便想想，这个概念和之前学的知识点有什么联系？"
+    if "自律性差" in profile.pain_points:
+        return " 你已经讲到了关键部分，再往前迈一步就完整了！"
+    return ""
 
 
 def _coverage(text: str) -> dict[str, bool]:
@@ -152,7 +218,7 @@ def _is_complete(coverage: dict[str, bool]) -> bool:
     return all(coverage.values())
 
 
-def _build_report(text: str, coverage: dict[str, bool], kp_name: str) -> FeynmanChatData:
+def _build_report(text: str, coverage: dict[str, bool], kp_name: str, profile=None) -> FeynmanChatData:
     covered_count = sum(1 for value in coverage.values() if value)
     understanding = min(10, 2 + covered_count * 2)
     completeness = min(10, 2 + covered_count * 2)
@@ -205,4 +271,5 @@ def _build_report(text: str, coverage: dict[str, bool], kp_name: str) -> Feynman
                 "而是把适用前提、核心机制和正确性依据之间的因果关系讲清楚。"
             ),
         ),
+        review_plan=_build_mock_review_plan(dimensions, kp_name),
     )
