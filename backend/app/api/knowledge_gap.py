@@ -57,6 +57,22 @@ def get_gap_stats(
     }
 
 
+@router.get("/review-due", response_model=dict)
+def get_review_due_gaps(
+    actor: CurrentActor = Depends(require_current_user),
+    session: Session = Depends(get_session),
+):
+    """GET /api/v1/gaps/review-due — 查询当前用户今天到期的复习项。"""
+    return {
+        "code": 200,
+        "msg": "success",
+        "data": KnowledgeGapService.get_review_due_gaps(
+            session,
+            actor.user_id,
+        ),
+    }
+
+
 # 声明 HTTP PATCH 请求路由，路径为 /gaps/{gap_id}，用于修改某个漏洞的状态[cite: 1, 3]
 @router.patch("/{gap_id}", response_model=dict)
 def update_gap_status(

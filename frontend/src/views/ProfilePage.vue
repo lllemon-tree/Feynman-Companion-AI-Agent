@@ -55,7 +55,16 @@ async function startReviewKp(group) {
       if (dim.status !== 'resolved') await updateGapStatus(dim.gap_id, 'resolved')
     }
   }
-  await loadGaps()
+  await Promise.all([loadGaps(), loadReviewDueGaps(false)])
+}
+
+async function startDueReview(gap) {
+  try {
+    await updateGapStatus(gap.gap_id, 'reviewing')
+    await Promise.all([loadGaps(), loadReviewDueGaps(false)])
+  } catch (e) {
+    alert('开始复习失败: ' + e.message)
+  }
 }
 
 // 按 kp_id 分组，每张卡片代表一个 KP
@@ -161,13 +170,13 @@ async function loadGaps() {
   }
 }
 
-async function loadReviewDueGaps() {
+async function loadReviewDueGaps(openList = true) {
   if (!isLoggedIn.value) return
   loadingReviewDue.value = true
   try {
     const data = await getReviewDueGaps()
     reviewDueGaps.value = data.items || []
-    showReviewDue.value = true
+    if (openList) showReviewDue.value = true
   } catch (e) {
     reviewDueGaps.value = []
   } finally {
@@ -304,6 +313,7 @@ function handleTabChange(key) {
     loadUserProfile()
   } else if (key === 'gaps') {
     loadGaps()
+    loadReviewDueGaps(false)
   } else if (key === 'sessions') {
     loadSessions()
   } else if (key === 'reports') {
@@ -649,7 +659,7 @@ onMounted(() => {
                 <span class="review-score-max">/ 10</span>
               </div>
               <p class="review-gap-desc">{{ gap.gap_description }}</p>
-              <button class="review-action-btn" @click="startReviewKp({ kp_id: gap.kp_id, dimensions: [gap] })">
+              <button class="review-action-btn" @click="startDueReview(gap)">
                 开始复习
               </button>
             </div>
