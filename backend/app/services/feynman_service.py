@@ -30,7 +30,8 @@ from backend.app.services.session_store import (
     SessionState,
     SessionStore,
 )
-
+from sqlalchemy.orm import Session
+from backend.app.services.user_profile_service import UserProfileService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class FeynmanService:
         knowledge_point_provider: Optional[KnowledgePointProvider] = None,
         rag_retriever: Optional[RAGRetriever] = None,
         report_finalizer: Optional[ReportFinalizer] = None,
+        profile_provider=None,
     ) -> None:
         self._store = store
         self._llm_client = llm_client
@@ -59,6 +61,7 @@ class FeynmanService:
             max_follow_ups=self._settings.max_follow_ups,
             primary_provider_name=primary_provider_name,
             rag_retriever=rag_retriever or get_rag_retriever(),
+            profile_provider=profile_provider,
         )
 
     async def chat(
@@ -66,17 +69,26 @@ class FeynmanService:
         request: FeynmanChatRequest,
         user_id: str = GUEST_USER_ID,
     ) -> FeynmanChatData:
-        print(f"🔵 chat called: session={request.session_id}, kp={request.kp_id}, user={user_id}")
+        print(f"📝 user_input: {request.user_input.strip()[:120]}")
         if not request.user_input.strip():
             raise ValueError("user_input cannot be empty")
 
         session = self._store.get_or_create(request.session_id, user_id)
-        print(f"🔵 session loaded: kp_id={session.kp_id}, material_id={session.material_id}, messages={len(session.messages)}")
         if session.ended and session.final_response is not None:
             self._finalize_report_safely(session, session.final_response)
             return session.final_response
-        response = await self._graph.run(request=request, session=session)
-        print(f"🔵 graph returned: next_action={response.next_action}")
+        # 尝试获取用户画像（如果是游客 GUEST_USER_ID 则跳过）
+        profile = None
+        if user_id != GUEST_USER_ID:
+            try:
+                # 使用现有的 engine 开启一个简短的数据库会话
+                with Session(engine) as db:
+                    profile = UserProfileService.get_profile_by_user_id(db, user_id)
+            except Exception as e:
+                logger.warning(f"Failed to fetch user profile for {user_id}: {e}")
+
+        # 将 profile 传给 graph.run
+        response = await self._graph.run(request=request, session=session, profile=profile)
         self._store.save(session)
         self._finalize_report_safely(session, response)
         return response
@@ -191,4 +203,15 @@ def get_feynman_service() -> FeynmanService:
         llm_client=llm_client,
         fallback_client=MockLLMClient(),
         report_finalizer=DiagnosticReportFinalizer(engine),
+        profile_provider=_load_profile_from_db,
     )
+
+
+def _load_profile_from_db(user_id: str):
+    """从数据库加载用户学情画像，供 graph 的 _load_context 节点调用。"""
+    from sqlmodel import Session
+
+    from backend.app.services.user_profile_service import UserProfileService
+
+    with Session(engine) as db:
+        return UserProfileService.get_profile_by_user_id(db, user_id)

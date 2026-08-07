@@ -1,7 +1,7 @@
 import unittest
 
 from backend.app.models.feynman import ChatMessage
-from backend.app.services.prompts import build_system_prompt, build_user_prompt
+from backend.app.services.prompt_builder import build_system_prompt, build_user_prompt
 
 
 class FeynmanPromptTest(unittest.TestCase):

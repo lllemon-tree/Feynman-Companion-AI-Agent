@@ -16,6 +16,9 @@ from backend.app.models.feynman import (
     FinalReport,
     FeynmanChatData,
     NextAction,
+    PriorityItem,
+    ReviewPlan,
+    ReviewPlanItem,
 )
 from backend.app.services.diagnostic_report_service import (
     DiagnosticReportFinalizer,
@@ -206,6 +209,65 @@ class DiagnosticReportServiceTest(unittest.TestCase):
         self.assertEqual(severity_for_score(4), 4)
         self.assertEqual(severity_for_score(5), 4)
         self.assertEqual(severity_for_score(6), 3)
+
+    def test_review_plan_is_persisted_and_loaded_back(self):
+        # 构造一个带复习计划的报告响应
+        response = _final_response()
+        response.review_plan = ReviewPlan(
+            reread_guide=[
+                ReviewPlanItem(
+                    priority=1,
+                    material_name="数据结构教材",
+                    page_hint="第3章 第30页",
+                    focus="贪心策略正确性证明",
+                    reason="理解深度得分偏低",
+                )
+            ],
+            related_kps=[],
+            priority_order=[
+                PriorityItem(
+                    rank=1,
+                    dimension="理解深度",
+                    kp_name="Dijkstra 算法",
+                    suggestion="优先补证明",
+                )
+            ],
+        )
+        state = SessionState(
+            session_id="session-review-plan",
+            user_id="user-a",
+            kp_id="kp-dijkstra",
+            kp_name="Dijkstra 算法",
+            ended=True,
+        )
+
+        report = self.finalizer.finalize(state, response)
+        self.assertIsNotNone(report)
+
+        with Session(self.engine) as db:
+            detail = get_report_detail(db, "user-a", report.id)
+
+        # 落库后再读出来，review_plan 应完整还原
+        self.assertIsNotNone(detail.review_plan)
+        self.assertEqual(len(detail.review_plan.reread_guide), 1)
+        self.assertEqual(detail.review_plan.reread_guide[0].focus, "贪心策略正确性证明")
+        self.assertEqual(len(detail.review_plan.priority_order), 1)
+
+    def test_report_without_review_plan_returns_none(self):
+        state = SessionState(
+            session_id="session-no-plan",
+            user_id="user-a",
+            kp_id="kp-dijkstra",
+            kp_name="Dijkstra 算法",
+            ended=True,
+        )
+        report = self.finalizer.finalize(state, _final_response())
+        self.assertIsNotNone(report)
+
+        with Session(self.engine) as db:
+            detail = get_report_detail(db, "user-a", report.id)
+
+        self.assertIsNone(detail.review_plan)
 
 
 class DiagnosticReportApiTest(unittest.TestCase):

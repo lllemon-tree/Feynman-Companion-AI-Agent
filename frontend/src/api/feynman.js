@@ -26,7 +26,9 @@ import {
   MOCK_GAPS_STATS,
   MOCK_GAP_UPDATE,
   MOCK_REPORTS,
-  MOCK_REPORT_DETAIL
+  MOCK_REPORT_DETAIL,
+  MOCK_REVIEW_DUE_GAPS,
+  MOCK_USER_STATS
 } from './mockData'
 
 const LEGACY_USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
@@ -562,5 +564,29 @@ export async function getReportDetail(reportId) {
     return MOCK_REPORT_DETAIL.data
   }
   const data = await http.get(`/reports/${reportId}`)
+  return data?.data
+}
+
+/**
+ * 获取今日待复习漏洞列表
+ */
+export async function getReviewDueGaps() {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    return MOCK_REVIEW_DUE_GAPS.data
+  }
+  const data = await http.get('/gaps/review-due')
+  return data?.data
+}
+
+/**
+ * 获取学情统计数据
+ */
+export async function getUserStats() {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    return MOCK_USER_STATS.data
+  }
+  const data = await http.get('/user/stats')
   return data?.data
 }

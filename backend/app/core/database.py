@@ -48,6 +48,16 @@ def create_db_and_tables():
                     f"ON {table_name}(user_id)"
                 )
             )
+        # Week 7 migration: add review_plan column to diagnostic_report
+        if inspect(connection).has_table("diagnostic_report"):
+            report_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("diagnostic_report")
+            }
+            if "review_plan" not in report_columns:
+                connection.execute(
+                    text("ALTER TABLE diagnostic_report ADD COLUMN review_plan TEXT")
+                )
     with Session(engine) as session:
         if session.get(User, GUEST_USER_ID) is None:
             session.add(
