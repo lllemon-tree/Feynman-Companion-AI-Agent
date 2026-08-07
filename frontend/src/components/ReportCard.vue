@@ -1,11 +1,31 @@
 <script setup>
-defineProps({
+import { computed } from 'vue'
+
+const props = defineProps({
   cardPreview: {
     type: Object,
     required: true
+  },
+  finalReport: {
+    type: Object,
+    default: null
   }
 })
 defineEmits(['click'])
+
+const displayScore = computed(() => {
+  const dimensions = props.finalReport?.dimensions
+  if (Array.isArray(dimensions) && dimensions.length > 0) {
+    const total = dimensions.reduce((sum, dimension) => {
+      const score = Number(dimension?.score)
+      return sum + (Number.isFinite(score) ? score : 0)
+    }, 0)
+    return (total / dimensions.length).toFixed(1)
+  }
+
+  const total = Number(props.cardPreview?.total_score)
+  return (Number.isFinite(total) ? total / 4 : 0).toFixed(1)
+})
 </script>
 
 <template>
@@ -34,7 +54,7 @@ defineEmits(['click'])
 
       <div class="card-body">
         <div class="score-row">
-          <span class="score-num">{{ (cardPreview.total_score / 4).toFixed(1) }}</span>
+          <span class="score-num">{{ displayScore }}</span>
           <span class="score-total">/ 10</span>
           <div class="score-desc">综合评分</div>
         </div>

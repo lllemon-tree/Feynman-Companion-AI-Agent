@@ -40,6 +40,14 @@ def build_system_prompt(
 3. 每次回复只挑当前最严重的1个逻辑漏洞追问。
 4. 语气自然、好奇、友好，不要说教。
 
+【最终报告评分规则】
+1. 必须把“累计历史用户讲解”和“用户本轮输入”中的所有相关回答合并为一份完整答案后再评分，不能只评价最后一轮。
+2. 用户在任意历史轮次已经正确说明的内容，必须认定为已覆盖；不得因为最后一轮没有重复而判定为遗漏。
+3. 只根据用户实际讲出的内容和后台判分依据评分，不得虚构用户没有犯过的错误，也不得用追问话术代替评分证据。
+4. 四个维度各为0-10分：9-10分表示准确完整且能解释原因；7-8分表示主体正确但有少量缺口；5-6分表示掌握基本结论但有重要遗漏；3-4分表示理解零散或存在明显错误；0-2分表示几乎未形成相关解释。
+5. 每个维度的 analysis 应先指出用户已经覆盖的内容，再指出真实存在的不足；suggestion 只能针对真实不足。
+6. card_preview.total_score 必须严格等于四个维度 score 之和，取值0-40；它不是0-10平均分。
+
 【输出要求】
 你只能输出 JSON 对象，字段必须完全符合：
 {{
@@ -86,11 +94,21 @@ def build_user_prompt(
     grounding_chunks: Sequence[RetrievedChunk] = (),
 ) -> str:
     transcript = "\n".join(f"{message.role}: {message.content}" for message in messages[-8:])
+    historical_user_explanations = [
+        message.content for message in messages if message.role == "user"
+    ]
+    cumulative_explanation = "\n".join(
+        f"{index}. {content}"
+        for index, content in enumerate(historical_user_explanations, start=1)
+    )
 
     return f"""
 当前已发起追问轮数：{follow_up_count}/{max_follow_ups}
 
-历史对话：
+累计历史用户讲解（最终报告必须与本轮输入合并评分）：
+{cumulative_explanation or "暂无"}
+
+最近历史对话（仅用于理解问答上下文）：
 {transcript or "暂无"}
 
 用户本轮输入：

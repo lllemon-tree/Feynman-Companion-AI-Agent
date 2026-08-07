@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional
+from typing import Annotated, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 from backend.app.core.database import get_session
 from backend.app.api.dependencies import require_current_user, CurrentActor
-from backend.app.models.knowledge_gap import KnowledgeGapUpdate
+from backend.app.models.knowledge_gap import KnowledgeGapStatus, KnowledgeGapUpdate
 from backend.app.services.knowledge_gap_service import KnowledgeGapService
 
 # 实例化 APIRouter，指定路由统一前缀为 /gaps，Swagger 标签分类为 KnowledgeGap
@@ -14,11 +15,11 @@ router = APIRouter(prefix="/gaps", tags=["KnowledgeGap"])
 @router.get("", response_model=dict)
 def get_gaps(
     # 接收 URL query 参数 status，可选（如 ?status=open）[cite: 1, 3]
-    status: Optional[str] = None,
+    status: Optional[KnowledgeGapStatus] = None,
     # 接收 URL query 参数 page，默认第 1 页[cite: 1, 3]
-    page: int = 1,
+    page: Annotated[int, Query(ge=1)] = 1,
     # 接收 URL query 参数 page_size，默认每页 20 条[cite: 1, 3]
-    page_size: int = 20,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
     # 注入登录鉴权依赖，解析当前用户[cite: 2]
     actor: CurrentActor = Depends(require_current_user),
     # 注入数据库会话依赖

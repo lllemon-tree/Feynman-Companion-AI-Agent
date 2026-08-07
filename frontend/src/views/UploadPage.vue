@@ -6,6 +6,7 @@ import {
   fetchSubjects,
   getKnowledgeTree,
   getMaterialStatus,
+  getUserProfile,
   retryMaterial,
   uploadMaterial
 } from '@/api/feynman'
@@ -33,6 +34,16 @@ const showToast = ref(false)
 // 学情初始化弹窗
 const isLoggedIn = computed(() => authStore.isLoggedIn)
 const showProfileModal = ref(false)
+const PROFILE_PROMPT_DISMISSED_PREFIX = 'feynman_profile_prompt_dismissed'
+const PROFILE_FIELDS = [
+  'nickname',
+  'exam_subject',
+  'exam_sub_category',
+  'preparation_stage',
+  'exam_type',
+  'target_school',
+  'target_major'
+]
 
 const STEP_LABELS = {
   parsing: '解析中',
@@ -224,6 +235,33 @@ function handleSubjectChange(s) {
   loadMaterials()
 }
 
+function profilePromptStorageKey() {
+  return `${PROFILE_PROMPT_DISMISSED_PREFIX}:${authStore.userId}`
+}
+
+function hasProfileData(profile) {
+  if (!profile) return false
+  const hasTextField = PROFILE_FIELDS.some(field => {
+    const value = profile[field]
+    return typeof value === 'string' && value.trim().length > 0
+  })
+  return hasTextField || (Array.isArray(profile.pain_points) && profile.pain_points.length > 0)
+}
+
+async function openProfileSetupForFirstLogin() {
+  if (!isLoggedIn.value || !authStore.userId) return
+
+  const storageKey = profilePromptStorageKey()
+  if (localStorage.getItem(storageKey) === 'true') return
+
+  try {
+    const profile = await getUserProfile()
+    showProfileModal.value = !hasProfileData(profile)
+  } catch (e) {
+    console.warn('检查学情初始化状态失败，本次不弹出填写窗口:', e)
+  }
+}
+
 onMounted(async () => {
   try {
     const storedSubjects = await fetchSubjects()
@@ -232,19 +270,20 @@ onMounted(async () => {
     console.warn('加载科目列表失败，使用默认科目:', e)
   }
   loadMaterials()
-  
-  // 首次登录自动弹出学情初始化弹窗
-  if (isLoggedIn.value) {
-    showProfileModal.value = true
-  }
+  await openProfileSetupForFirstLogin()
 })
 
 function closeProfileModal() {
+  if (authStore.userId) {
+    localStorage.setItem(profilePromptStorageKey(), 'true')
+  }
   showProfileModal.value = false
 }
 
 function handleProfileSaved() {
-  // 学情保存成功后关闭弹窗
+  if (authStore.userId) {
+    localStorage.setItem(profilePromptStorageKey(), 'true')
+  }
   showProfileModal.value = false
 }
 </script>
