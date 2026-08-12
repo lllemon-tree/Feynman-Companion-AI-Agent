@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
+from backend.app.core.database import get_session
 from backend.app.models.knowledge import Chapter, Chunk, KP, KPUpdateRequest, Material
 from backend.app.main import app
 from backend.app.services.kp_service import get_kp_detail_from_db, update_kp_in_db
@@ -208,7 +209,23 @@ def _build_text_pdf(with_toc: bool, toc: list[list] | None = None) -> bytes:
 
 class MaterialApiContractTest(unittest.TestCase):
     def setUp(self) -> None:
+        self.engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        SQLModel.metadata.create_all(self.engine)
+
+        def override_session():
+            with Session(self.engine) as session:
+                yield session
+
+        app.dependency_overrides[get_session] = override_session
         self.client = TestClient(app)
+
+    def tearDown(self) -> None:
+        app.dependency_overrides.clear()
+        self.engine.dispose()
 
     def test_tree_uses_real_empty_result_for_unknown_subject(self) -> None:
         response = self.client.get(

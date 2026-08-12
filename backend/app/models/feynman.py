@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ==================== 复习计划相关模型 ====================
 
@@ -35,19 +35,23 @@ class PriorityItem(BaseModel):
     # 针对该维度的具体复习行动建议，字符串类型
     suggestion: str
 
+
 class ReviewPlan(BaseModel):
     # 教材重读指引列表。指定子元素必须是 ReviewPlanItem 结构。
     # 使用 default_factory=list 确保每次实例化未传值时，生成独立的空列表 []
     reread_guide: List[ReviewPlanItem] = Field(default_factory=list)
-    
+
     # 同类知识点推荐列表。指定子元素必须是 RelatedKp 结构。
     # 使用 default_factory=list 防止列表数据在多实例间共享内存
     related_kps: List[RelatedKp] = Field(default_factory=list)
-    
+
     # 学习优先级排序列表。指定子元素必须是 PriorityItem 结构。
     # 使用 default_factory=list 保证初始状态安全为空
     priority_order: List[PriorityItem] = Field(default_factory=list)
+
+
 # ================================================================
+
 
 class NextAction(str, Enum):
     FOLLOW_UP = "follow_up"
@@ -88,6 +92,31 @@ class FeynmanChatData(BaseModel):
     card_preview: Optional[CardPreview] = None
     final_report: Optional[FinalReport] = None
     review_plan: Optional[ReviewPlan] = None
+
+    @model_validator(mode="after")
+    def use_dimension_scores_as_total(self):
+        """Keep the report card score consistent with the four dimensions.
+
+        The LLM occasionally returns a 0-10 average in ``card_preview.total_score``
+        even though the API contract defines that field as the 0-40 sum.  The
+        dimension scores are the detailed, persisted source of truth, so derive
+        the card total from them whenever a complete report is present.
+        """
+        if (
+            self.next_action == NextAction.GENERATE_REPORT
+            and self.final_report is not None
+        ):
+            expected_total = sum(
+                dimension.score for dimension in self.final_report.dimensions
+            )
+            if (
+                self.card_preview is not None
+                and self.card_preview.total_score != expected_total
+            ):
+                self.card_preview = self.card_preview.model_copy(
+                    update={"total_score": expected_total}
+                )
+        return self
 
 
 class ApiResponse(BaseModel):
@@ -176,6 +205,3 @@ class SessionListResponse(BaseModel):
     code: int
     msg: str
     data: List[SessionSummaryData] = Field(default_factory=list)
-
-
-

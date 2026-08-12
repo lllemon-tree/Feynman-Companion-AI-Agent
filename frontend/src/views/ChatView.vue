@@ -95,6 +95,7 @@ function openDrawer() {
         <ReportCard
           v-if="store.isReportReady && store.reportData?.cardPreview"
           :card-preview="store.reportData.cardPreview"
+          :final-report="store.reportData.finalReport"
           @click="openDrawer"
         />
       </div>

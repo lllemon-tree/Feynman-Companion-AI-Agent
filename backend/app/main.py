@@ -16,6 +16,8 @@ from backend.app.api.knowledge_gap import router as knowledge_gap_router
 from backend.app.api.materials import router as material_router
 from backend.app.api.kp import router as kp_router
 from backend.app.api.user_profile import router as user_profile_router
+from backend.app.api.user_stats import router as user_stats_router
+
 # 建表引擎导入
 from backend.app.core.database import create_db_and_tables
 
@@ -71,4 +73,5 @@ app.include_router(material_router, prefix="/api/v1")
 app.include_router(kp_router, prefix="/api/v1")
 app.include_router(diagnostic_report_router, prefix="/api/v1")
 app.include_router(user_profile_router, prefix="/api/v1")
+app.include_router(user_stats_router, prefix="/api/v1")
 app.include_router(knowledge_gap_router, prefix="/api/v1")

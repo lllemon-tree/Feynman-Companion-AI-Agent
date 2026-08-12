@@ -9,6 +9,7 @@ from backend.app.core.database import get_session
 from backend.app.core.security import create_access_token
 from backend.app.main import app
 from backend.app.models.auth import User
+from backend.app.models.user_profile import UserProfile
 
 
 class AuthApiTest(unittest.TestCase):
@@ -44,6 +45,10 @@ class AuthApiTest(unittest.TestCase):
             ).one()
             self.assertNotEqual(user.password_hash, payload["password"])
             self.assertTrue(user.password_hash.startswith("$argon2"))
+            profile = session.get(UserProfile, user.id)
+            self.assertIsNotNone(profile)
+            self.assertIsNone(profile.exam_subject)
+            self.assertIsNone(profile.preparation_stage)
 
         duplicate = self.client.post("/api/v1/auth/register", json=payload)
         self.assertEqual(duplicate.status_code, 400)

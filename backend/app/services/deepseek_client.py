@@ -1,5 +1,5 @@
 import json
-from typing import Any, Sequence
+from typing import Any, Optional, Sequence
 
 import httpx
 
@@ -7,19 +7,16 @@ from backend.app.core.config import Settings
 from backend.app.models.feynman import ChatMessage, FeynmanChatData
 from backend.app.models.knowledge import KPExtractionResponse
 from backend.app.models.rag import RetrievedChunk
+from backend.app.models.user_profile import UserProfileResponse
 from backend.app.services.kp_provider import KnowledgePoint
+from backend.app.services.prompt_builder import build_system_prompt, build_user_prompt
 from backend.app.services.prompts import (
     KP_EXTRACTION_SYSTEM_PROMPT,
     RUBRIC_GENERATION_SYSTEM_PROMPT,
     build_kp_user_prompt,
     build_rubric_user_prompt,
 )
-from backend.app.services.prompt_builder import (
-    build_system_prompt,
-    build_user_prompt,
-)
-from backend.app.models.user_profile import UserProfileResponse 
-from typing import Optional 
+
 
 class DeepSeekClient:
     def __init__(self, settings: Settings) -> None:

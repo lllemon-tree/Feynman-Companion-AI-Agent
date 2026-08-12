@@ -4,9 +4,12 @@ import uuid
 # 从 datetime 模块导入 datetime 用于处理时间戳
 from datetime import datetime
 # 从 typing 模块导入 Optional 类型注解声明可空字段
-from typing import Optional
+from typing import Literal, Optional
 # 从 sqlmodel 库导入 SQLModel 模型基类与 Field 字段配置函数
 from sqlmodel import SQLModel, Field
+
+
+KnowledgeGapStatus = Literal["open", "reviewing", "resolved"]
 
 
 def generate_gap_id() -> str:
@@ -93,7 +96,9 @@ class KnowledgeGapUpdate(SQLModel):
     """漏洞状态更新请求体模型（PATCH /api/v1/gaps/{gap_id} 使用）[cite: 1, 3]"""
 
     # 仅允许更新漏洞的状态[cite: 1, 3]
-    status: str = Field(description="更新后的状态: open/reviewing/resolved")
+    status: KnowledgeGapStatus = Field(
+        description="更新后的状态: open/reviewing/resolved"
+    )
 
 
 class KnowledgeGapResponse(KnowledgeGapBase):

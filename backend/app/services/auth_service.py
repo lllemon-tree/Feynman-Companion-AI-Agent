@@ -9,6 +9,7 @@ from backend.app.core.security import (
     verify_password,
 )
 from backend.app.models.auth import LoginData, RegisterData, User
+from backend.app.models.user_profile import UserProfile
 
 
 class UsernameAlreadyExistsError(ValueError):
@@ -37,8 +38,13 @@ def register_user(
         username=normalized_username,
         password_hash=hash_password(password),
     )
-    session.add(user)
-    session.commit()
+    profile = UserProfile(user_id=user.id)
+    session.add_all([user, profile])
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     session.refresh(user)
     return RegisterData(user_id=user.id)
 

@@ -3,7 +3,15 @@ import unittest
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
-from backend.app.models.feynman import FeynmanChatRequest, NextAction, ResetSessionRequest
+from backend.app.models.feynman import (
+    CardPreview,
+    DimensionReport,
+    FinalReport,
+    FeynmanChatData,
+    FeynmanChatRequest,
+    NextAction,
+    ResetSessionRequest,
+)
 from backend.app.services.feynman_service import FeynmanService
 from backend.app.services.mock_llm import MockLLMClient
 from backend.app.services.session_store import InMemorySessionStore
@@ -27,6 +35,29 @@ class RecordingLLMClient:
 class FailingReportFinalizer:
     def finalize(self, session_state, response):
         raise RuntimeError("simulated report persistence failure")
+
+
+class InconsistentScoreLLMClient:
+    async def evaluate(self, **kwargs):
+        scores = [7, 6, 8, 7]
+        names = ["理解深度", "表达完整性", "逻辑连贯性", "结构化能力"]
+        return FeynmanChatData(
+            next_action=NextAction.GENERATE_REPORT,
+            reply_text="本轮讲解结束。",
+            card_preview=CardPreview(total_score=7, summary="仍有少量内容可补充"),
+            final_report=FinalReport(
+                dimensions=[
+                    DimensionReport(
+                        name=name,
+                        score=score,
+                        analysis=f"{name}分析",
+                        suggestion=f"{name}建议",
+                    )
+                    for name, score in zip(names, scores)
+                ],
+                overall_comment="主体理解正确，可以继续补充例证。",
+            ),
+        )
 
 
 class FeynmanServiceTest(unittest.IsolatedAsyncioTestCase):
@@ -66,6 +97,35 @@ class FeynmanServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(final.next_action, NextAction.GENERATE_REPORT)
         self.assertIsNotNone(final.card_preview)
         self.assertIsNotNone(final.final_report)
+
+    async def test_report_total_is_recomputed_from_dimension_scores(self):
+        service = FeynmanService(
+            store=InMemorySessionStore(),
+            llm_client=InconsistentScoreLLMClient(),
+            fallback_client=MockLLMClient(),
+        )
+
+        final = await service.chat(
+            FeynmanChatRequest(
+                session_id="inconsistent-score",
+                user_input="这是一次完整讲解",
+            )
+        )
+
+        self.assertEqual(final.next_action, NextAction.GENERATE_REPORT)
+        self.assertEqual(final.card_preview.total_score, 28)
+        self.assertEqual(
+            final.card_preview.total_score,
+            sum(dimension.score for dimension in final.final_report.dimensions),
+        )
+
+        sticky = await service.chat(
+            FeynmanChatRequest(
+                session_id="inconsistent-score",
+                user_input="已经结束后再次请求",
+            )
+        )
+        self.assertEqual(sticky.card_preview.total_score, 28)
 
     async def test_ineffective_answer_returns_hint_without_report(self):
         response = await self.service.chat(
