@@ -1,13 +1,15 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
-import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats } from '@/api/feynman'
+import { useChatStore } from '@/stores/chatStore'
+import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview } from '@/api/feynman'
 import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
 import ReportDrawer from '@/components/ReportDrawer.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const chatStore = useChatStore()
 
 const activeTab = ref('profile')
 const loading = ref(false)
@@ -27,6 +29,13 @@ const reviewDueGaps = ref([])
 const showReviewDue = ref(false)
 const loadingReviewDue = ref(false)
 
+// 复习入口加载态：避免重复点击
+const reviewStarting = ref(false)
+const reviewStartingKpId = ref('')
+
+// 标记是否从对话页返回（返回后需要刷新漏洞/统计）
+const needRefreshOnReturn = ref(false)
+
 // 学情统计
 const userStats = ref(null)
 const loadingUserStats = ref(false)
@@ -41,29 +50,90 @@ function toggleKp(kpId) {
   expandedKps.value = next
 }
 
+/**
+ * 知识漏洞列表：开始复习 / 手动标记已掌握 / 重新打开
+ * 第八周：开始复习统一调用 POST /reviews/start，不再直接 PATCH reviewing
+ * - 有 open/reviewing 维度 → startReview + 进入对话
+ * - 全部 resolved → 手动重新打开（PATCH open）
+ * - 复习中 → 手动标记已掌握（PATCH resolved）
+ */
 async function startReviewKp(group) {
-  if (group.dimensions.some(d => d.status === 'open')) {
-    for (const dim of group.dimensions) {
-      if (dim.status === 'open') await updateGapStatus(dim.gap_id, 'reviewing')
+  // 有未解决漏洞：调用 startReview 进入复习对话
+  if (group.dimensions.some(d => d.status === 'open' || d.status === 'reviewing')) {
+    if (reviewStarting.value) return
+    reviewStarting.value = true
+    reviewStartingKpId.value = group.kp_id
+    try {
+      const reviewData = await startReview(group.kp_id, 'gap')
+      // 设置 chatStore 复习上下文（reviewId/sessionId/targetGaps 等）
+      chatStore.clearReviewContext()
+      chatStore.clearKnowledgeContext()
+      chatStore.setKnowledgePoint(group.kp_id, group.kp_name)
+      chatStore.startReviewContext(reviewData)
+      // 标记返回后需要刷新
+      needRefreshOnReturn.value = true
+      router.push('/home')
+    } catch (e) {
+      const msg = e.status === 409
+        ? '当前知识点暂无未解决漏洞，可能已全部掌握'
+        : '开始复习失败: ' + e.message
+      alert(msg)
+    } finally {
+      reviewStarting.value = false
+      reviewStartingKpId.value = ''
     }
-  } else if (group.dimensions.every(d => d.status === 'resolved')) {
-    for (const dim of group.dimensions) {
-      await updateGapStatus(dim.gap_id, 'open')
+    return
+  }
+  // 全部已掌握：手动重新打开
+  if (group.dimensions.every(d => d.status === 'resolved')) {
+    try {
+      for (const dim of group.dimensions) {
+        await updateGapStatus(dim.gap_id, 'open')
+      }
+      await Promise.all([loadGaps(), loadReviewDueGaps(false)])
+    } catch (e) {
+      alert('重新打开失败: ' + e.message)
     }
-  } else {
+    return
+  }
+  // 复习中：手动标记已掌握
+  try {
     for (const dim of group.dimensions) {
       if (dim.status !== 'resolved') await updateGapStatus(dim.gap_id, 'resolved')
     }
+    await loadGaps()
+  } catch (e) {
+    alert('标记已掌握失败: ' + e.message)
   }
-  await Promise.all([loadGaps(), loadReviewDueGaps(false)])
 }
 
+/**
+ * 今日待复习：开始或继续复习
+ * 第八周：统一调用 POST /reviews/start
+ * - action='start' → 新建复习记录
+ * - action='continue' → 返回已有 active 记录（resumed=true）
+ * 进入对话后保留知识点信息和本次复习目标
+ */
 async function startDueReview(gap) {
+  if (reviewStarting.value) return
+  reviewStarting.value = true
+  reviewStartingKpId.value = gap.kp_id
   try {
-    await updateGapStatus(gap.gap_id, 'reviewing')
-    await Promise.all([loadGaps(), loadReviewDueGaps(false)])
+    const reviewData = await startReview(gap.kp_id, 'due')
+    chatStore.clearReviewContext()
+    chatStore.clearKnowledgeContext()
+    chatStore.setKnowledgePoint(gap.kp_id, gap.kp_name)
+    chatStore.startReviewContext(reviewData)
+    needRefreshOnReturn.value = true
+    router.push('/home')
   } catch (e) {
-    alert('开始复习失败: ' + e.message)
+    const msg = e.status === 409
+      ? '当前知识点暂无未解决漏洞，可能已全部掌握'
+      : '开始复习失败: ' + e.message
+    alert(msg)
+  } finally {
+    reviewStarting.value = false
+    reviewStartingKpId.value = ''
   }
 }
 
@@ -358,6 +428,14 @@ function delay(ms) {
 }
 
 onMounted(() => {
+  // 第八周：从复习对话返回时，自动切到知识漏洞页签并刷新数据
+  const route = router.currentRoute.value
+  const fromReview = route.query.from === 'review'
+  if (fromReview) {
+    activeTab.value = 'gaps'
+    // 清除 query，避免刷新后重复触发
+    router.replace({ path: '/profile' })
+  }
   // 加载学情统计数据
   loadUserStats()
   // 根据当前tab加载数据
@@ -365,12 +443,28 @@ onMounted(() => {
     loadUserProfile()
   } else if (activeTab.value === 'gaps') {
     loadGaps()
+    loadReviewDueGaps(false)
   } else if (activeTab.value === 'sessions') {
     loadSessions()
   } else if (activeTab.value === 'reports') {
     loadReports()
   } else if (activeTab.value === 'materials') {
     loadMaterials()
+  }
+})
+
+// 第八周：返回个人中心时刷新所有相关数据
+// 配合 ChatView 的 router.push('/profile?from=review') 使用
+onActivated(() => {
+  if (needRefreshOnReturn.value) {
+    needRefreshOnReturn.value = false
+    loadUserStats()
+    if (activeTab.value === 'gaps') {
+      loadGaps()
+      loadReviewDueGaps(false)
+    } else if (activeTab.value === 'reports') {
+      loadReports()
+    }
   }
 })
 </script>
@@ -659,8 +753,20 @@ onMounted(() => {
                 <span class="review-score-max">/ 10</span>
               </div>
               <p class="review-gap-desc">{{ gap.gap_description }}</p>
-              <button class="review-action-btn" @click="startDueReview(gap)">
-                开始复习
+              <button
+                class="review-action-btn"
+                :disabled="reviewStarting && reviewStartingKpId === gap.kp_id"
+                @click="startDueReview(gap)"
+              >
+                <svg
+                  v-if="reviewStarting && reviewStartingKpId === gap.kp_id"
+                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner"
+                >
+                  <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
+                </svg>
+                <span v-if="reviewStarting && reviewStartingKpId === gap.kp_id">进入复习中...</span>
+                <span v-else-if="gap.action === 'continue'">继续复习</span>
+                <span v-else>开始复习</span>
               </button>
             </div>
           </div>
@@ -760,11 +866,19 @@ onMounted(() => {
 
               <div class="gap-card-actions">
                 <button
-                  v-if="group.dimensions.some(d => d.status === 'open')"
+                  v-if="group.dimensions.some(d => d.status === 'open' || d.status === 'reviewing')"
                   class="action-btn action-btn--review"
+                  :disabled="reviewStarting && reviewStartingKpId === group.kp_id"
                   @click.stop="startReviewKp(group)"
                 >
-                  开始复习
+                  <svg
+                    v-if="reviewStarting && reviewStartingKpId === group.kp_id"
+                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner"
+                  >
+                    <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
+                  </svg>
+                  <span v-if="reviewStarting && reviewStartingKpId === group.kp_id">进入复习中...</span>
+                  <span v-else>开始复习</span>
                 </button>
                 <button
                   v-if="group.dimensions.every(d => d.status === 'resolved')"
@@ -1615,10 +1729,27 @@ export default {
   color: #D97706;
   cursor: pointer;
   transition: all 150ms;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
-.review-action-btn:hover {
+.review-action-btn:hover:not(:disabled) {
   background: rgba(245, 158, 11, 0.2);
+}
+
+.review-action-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.review-action-btn .spinner {
+  animation: spin 1s linear infinite;
+}
+
+.gap-card-actions .action-btn .spinner {
+  animation: spin 1s linear infinite;
 }
 
 /* Tab 容器 */

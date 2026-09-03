@@ -27,8 +27,15 @@ import {
   MOCK_GAP_UPDATE,
   MOCK_REPORTS,
   MOCK_REPORT_DETAIL,
-  MOCK_REVIEW_DUE_GAPS,
-  MOCK_USER_STATS
+  MOCK_USER_STATS,
+  MOCK_REVIEW_START_NEW,
+  MOCK_REVIEW_START_RESUMED,
+  MOCK_REVIEW_START_NO_GAPS,
+  MOCK_REVIEW_RESULT_ACTIVE,
+  MOCK_REVIEW_RESULT_COMPLETED,
+  MOCK_REVIEW_NOT_FOUND,
+  MOCK_REVIEW_GREETING,
+  MOCK_REVIEW_DUE_GAPS_EXTENDED
 } from './mockData'
 
 const LEGACY_USE_MOCK = import.meta.env.VITE_USE_MOCK === 'true'
@@ -99,15 +106,22 @@ export async function chatWithAgent(sessionId, userInput, kpId) {
   return data?.data
 }
 
-export async function fetchGreeting(kpId = null) {
+export async function fetchGreeting(kpId = null, sessionId = null) {
   if (USE_FEYNMAN_MOCK) {
     await delay(400)
+    // 复习场景：传入 session_id 时返回包含重点维度提示的复习引导语
+    if (sessionId) {
+      return MOCK_REVIEW_GREETING.data
+    }
     if (kpId) {
       return MOCK_GREETING_MAP[kpId] || MOCK_GREETING_DYNAMIC.data
     }
     return MOCK_GREETING.data
   }
-  const params = kpId ? { kp_id: kpId } : {}
+  // 复习场景：带上 session_id，后端返回含复习重点的引导语
+  const params = {}
+  if (kpId) params.kp_id = kpId
+  if (sessionId) params.session_id = sessionId
   const data = await http.get('/feynman/greeting', { params })
   return data?.data
 }
@@ -515,10 +529,29 @@ export async function getGaps(status = null) {
  * 更新漏洞状态
  * @param {string} gapId - 漏洞ID
  * @param {string} status - 新状态
+ *
+ * PRD 6.5 规则：
+ * - status=resolved：用户手动确认掌握，写入 resolution_source=manual 和 resolved_at；
+ * - status=open：用户主动重新加入待复习，清空解决信息；
+ * - 前端开始复习不再直接 PATCH reviewing，统一调用 /reviews/start；
+ * - 直接 PATCH status=reviewing 返回 400（规则5）；
+ * - gap 正处于 active 复习记录时，手动修改为 open/resolved 返回 409（规则6）。
  */
 export async function updateGapStatus(gapId, status) {
   if (USE_FEYNMAN_MOCK) {
     await delay(300)
+    // PRD 6.5 规则5：直接 PATCH status=reviewing 返回 400，避免绕过 review_attempt
+    if (status === 'reviewing') {
+      return Promise.reject(mockError({ code: 400, msg: 'cannot patch to reviewing directly, use /reviews/start', data: null }))
+    }
+    // PRD 6.5 规则6：gap 正处于 active 复习记录时，手动修改为 open/resolved 返回 409
+    if (mockActiveReviewGapIds.has(gapId) && (status === 'open' || status === 'resolved')) {
+      return Promise.reject(mockError({ code: 409, msg: 'gap is in an active review, complete the review first', data: null }))
+    }
+    // 正常修改：成功后从 active gap 集合移除（resolved 表示已掌握）
+    if (status === 'resolved') {
+      mockActiveReviewGapIds.delete(gapId)
+    }
     return {
       gap_id: gapId,
       status
@@ -569,11 +602,14 @@ export async function getReportDetail(reportId) {
 
 /**
  * 获取今日待复习漏洞列表
+ * 第八周扩展：返回项含 active_review_id 和 action 字段
+ * - active_review_id: 存在未完成复习时返回对应 review_id
+ * - action: 无 active 记录时为 'start'，有 active 记录时为 'continue'
  */
 export async function getReviewDueGaps() {
   if (USE_FEYNMAN_MOCK) {
     await delay(400)
-    return MOCK_REVIEW_DUE_GAPS.data
+    return MOCK_REVIEW_DUE_GAPS_EXTENDED.data
   }
   const data = await http.get('/gaps/review-due')
   return data?.data
@@ -589,4 +625,108 @@ export async function getUserStats() {
   }
   const data = await http.get('/user/stats')
   return data?.data
+}
+
+// ===== 第八周 复习闭环 API =====
+
+// 内存态 Mock：记录当前用户每个 KP 的 active review，用于模拟 resumed 行为
+const mockActiveReviews = new Map() // key: kp_id, value: review start 响应
+// 内存态 Mock：记录处于 active 复习中的 gap_id 集合，用于实现 PRD 6.5 规则6
+const mockActiveReviewGapIds = new Set()
+
+/**
+ * 构建 Mock 异常错误对象（与 http 拦截器行为一致）
+ * 真实后端返回 HTTP 4xx/5xx 时，拦截器提取 responseData.msg 作为 message、
+ * err.response.status 作为 status。Mock 模式下用相同方式构造，并挂载完整响应体。
+ * @param {{code: number, msg: string, data: any}} mockBody - Mock 响应体
+ */
+function mockError(mockBody) {
+  const err = new Error(mockBody.msg)
+  err.status = mockBody.code
+  err.body = mockBody // 挂载完整 {code, msg, data} 便于调试
+  return err
+}
+
+/**
+ * 开始或继续复习
+ * POST /api/v1/reviews/start
+ * @param {string} kpId - 知识点ID
+ * @param {string} source - 入口来源：'gap' 或 'due'
+ * @returns {Promise<object>} 复习记录（含 review_id、session_id、target_gaps 等）
+ *
+ * 行为：
+ * 1. 查询当前用户、当前 KP 的全部 open/reviewing 漏洞；
+ * 2. 没有未解决漏洞时返回 409，msg=no unresolved gaps；
+ * 3. 已有同 KP 的 active 复习记录时返回原记录，resumed=true；
+ * 4. 否则创建 review_attempt 和新的 session_id，并把 open 目标漏洞改为 reviewing；
+ * 5. 此时不修改 review_count、last_reviewed_at 和 next_review_at。
+ */
+export async function startReview(kpId, source = 'gap') {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(500)
+    // Mock：没有未解决漏洞时返回 409（使用 mockData 中定义的标准响应体）
+    if (kpId === 'kp-no-gaps') {
+      return Promise.reject(mockError(MOCK_REVIEW_START_NO_GAPS))
+    }
+    // Mock：已有 active 记录时返回 resumed=true（使用 mockData 中定义的 Mock）
+    const existing = mockActiveReviews.get(kpId)
+    if (existing) {
+      // 以定义的 MOCK_REVIEW_START_RESUMED 为模板，保留当前 kp 的动态字段
+      const resumed = JSON.parse(JSON.stringify(MOCK_REVIEW_START_RESUMED.data))
+      resumed.kp_id = existing.kp_id
+      resumed.review_id = existing.review_id
+      resumed.session_id = existing.session_id
+      resumed.target_gaps = existing.target_gaps
+      resumed.baseline_report_id = existing.baseline_report_id
+      return resumed
+    }
+    // Mock：新建复习记录（以 MOCK_REVIEW_START_NEW 为模板）
+    const record = JSON.parse(JSON.stringify(MOCK_REVIEW_START_NEW.data))
+    record.kp_id = kpId
+    record.resumed = false
+    mockActiveReviews.set(kpId, record)
+    // 记录本次复习涉及的目标 gap_id，用于 PRD 6.5 规则6 判定
+    record.target_gaps.forEach(g => mockActiveReviewGapIds.add(g.gap_id))
+    return record
+  }
+  const data = await http.post('/reviews/start', { kp_id: kpId, source })
+  return data?.data
+}
+
+/**
+ * 查询复习结果
+ * GET /api/v1/reviews/{review_id}
+ * @param {string} reviewId - 复习记录ID
+ * @returns {Promise<object>} 复习结果（含 status、dimension_changes 等）
+ *
+ * dimension_changes 中每项包含：
+ * - dimension: 维度名
+ * - previous_score / current_score / delta
+ * - result: 'mastered' | 'continue' | 'unchanged'
+ * - gap_id / gap_status / review_count / next_review_at
+ */
+export async function getReviewResult(reviewId) {
+  if (USE_FEYNMAN_MOCK) {
+    await delay(400)
+    // Mock：review_id 不属于当前用户时返回 404（使用 mockData 中定义的标准响应体）
+    if (reviewId === 'review-not-mine' || reviewId === 'review-not-found') {
+      return Promise.reject(mockError(MOCK_REVIEW_NOT_FOUND))
+    }
+    // Mock：复习仍为 active 时返回 result_report_id=null
+    if (reviewId === 'review-active') {
+      return MOCK_REVIEW_RESULT_ACTIVE.data
+    }
+    // Mock：默认返回复习完成结果
+    return MOCK_REVIEW_RESULT_COMPLETED.data
+  }
+  const data = await http.get(`/reviews/${reviewId}`)
+  return data?.data
+}
+
+/**
+ * 重置 Mock 复习状态（仅供 Mock 模式测试使用）
+ */
+export function _resetMockReviewState() {
+  mockActiveReviews.clear()
+  mockActiveReviewGapIds.clear()
 }

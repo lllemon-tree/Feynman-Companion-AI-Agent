@@ -634,3 +634,192 @@ export const MOCK_USER_STATS = {
     ]
   }
 }
+
+// ===== 第八周 复习闭环 Mock 数据 =====
+
+// 1) POST /reviews/start 新建成功，resumed=false
+export const MOCK_REVIEW_START_NEW = {
+  code: 200,
+  msg: 'success',
+  data: {
+    review_id: 'review-a1b2c3d4',
+    session_id: 'session-r1',
+    kp_id: 'kp-demo',
+    kp_name: 'Dijkstra 算法',
+    baseline_report_id: 'rpt-old',
+    status: 'active',
+    resumed: false,
+    target_gaps: [
+      {
+        gap_id: 'gap-depth',
+        dimension: '理解深度',
+        score: 4,
+        gap_description: '未解释贪心选择为什么成立',
+        review_count: 0
+      },
+      {
+        gap_id: 'gap-logic',
+        dimension: '逻辑连贯性',
+        score: 3,
+        gap_description: '无法证明贪心选择性质，混淆算法正确性和反证法的逻辑',
+        review_count: 0
+      }
+    ]
+  }
+}
+
+// 2) POST /reviews/start 返回已有 active 记录，resumed=true
+export const MOCK_REVIEW_START_RESUMED = {
+  code: 200,
+  msg: 'success',
+  data: {
+    review_id: 'review-a1b2c3d4',
+    session_id: 'session-r1',
+    kp_id: 'kp-demo',
+    kp_name: 'Dijkstra 算法',
+    baseline_report_id: 'rpt-old',
+    status: 'active',
+    resumed: true,
+    target_gaps: [
+      {
+        gap_id: 'gap-depth',
+        dimension: '理解深度',
+        score: 4,
+        gap_description: '未解释贪心选择为什么成立',
+        review_count: 0
+      },
+      {
+        gap_id: 'gap-logic',
+        dimension: '逻辑连贯性',
+        score: 3,
+        gap_description: '无法证明贪心选择性质，混淆算法正确性和反证法的逻辑',
+        review_count: 0
+      }
+    ]
+  }
+}
+
+// 3) GET /reviews/{review_id} 复习进行中，result_report_id=null
+export const MOCK_REVIEW_RESULT_ACTIVE = {
+  code: 200,
+  msg: 'success',
+  data: {
+    review_id: 'review-a1b2c3d4',
+    status: 'active',
+    session_id: 'session-r1',
+    kp_id: 'kp-demo',
+    kp_name: 'Dijkstra 算法',
+    baseline_report_id: 'rpt-old',
+    result_report_id: null,
+    dimension_changes: []
+  }
+}
+
+// 4) GET /reviews/{review_id} 复习完成，含一项 mastered + 一项 continue
+export const MOCK_REVIEW_RESULT_COMPLETED = {
+  code: 200,
+  msg: 'success',
+  data: {
+    review_id: 'review-a1b2c3d4',
+    status: 'completed',
+    session_id: 'session-r1',
+    kp_id: 'kp-demo',
+    kp_name: 'Dijkstra 算法',
+    baseline_report_id: 'rpt-old',
+    result_report_id: 'rpt-new',
+    dimension_changes: [
+      {
+        dimension: '理解深度',
+        previous_score: 4,
+        current_score: 8,
+        delta: 4,
+        result: 'mastered',
+        gap_id: 'gap-depth',
+        gap_status: 'resolved',
+        review_count: 1,
+        next_review_at: null
+      },
+      {
+        dimension: '逻辑连贯性',
+        previous_score: 3,
+        current_score: 6,
+        delta: 3,
+        result: 'continue',
+        gap_id: 'gap-logic',
+        gap_status: 'reviewing',
+        review_count: 1,
+        next_review_at: '2026-08-13T16:30:00'
+      }
+    ]
+  }
+}
+
+// 5) 异常 Mock：当前 KP 没有未解决漏洞（409）
+export const MOCK_REVIEW_START_NO_GAPS = {
+  code: 409,
+  msg: 'no unresolved gaps',
+  data: null
+}
+
+// 6) 异常 Mock：review_id 不属于当前用户（404）
+export const MOCK_REVIEW_NOT_FOUND = {
+  code: 404,
+  msg: 'review not found',
+  data: null
+}
+
+// 7) 复习场景引导语 Mock（包含重点维度提示，不暴露标准答案）
+export const MOCK_REVIEW_GREETING = {
+  code: 200,
+  msg: 'success',
+  data: {
+    next_action: 'follow_up',
+    reply_text:
+      '同学你好，我们继续复习 Dijkstra 算法。上次你在「理解深度」和「逻辑连贯性」上还有欠缺，这次我们先重点讲讲：为什么在边权非负的前提下，每次选当前距离最小的未访问节点，它的最短路径就确定了？请用大白话向我解释。',
+    card_preview: null,
+    final_report: null,
+    kp_id: 'kp-demo',
+    kp_name: 'Dijkstra 算法',
+    is_review: true,
+    review_focus_dimensions: ['理解深度', '逻辑连贯性']
+  }
+}
+
+// 8) 今日待复习列表扩展字段 Mock（含 active_review_id 和 action）
+export const MOCK_REVIEW_DUE_GAPS_EXTENDED = {
+  code: 200,
+  msg: 'success',
+  data: {
+    items: [
+      {
+        gap_id: 'gap-review-1',
+        kp_id: 'kp-demo',
+        kp_name: 'Dijkstra 算法',
+        dimension: '理解深度',
+        score: 4,
+        severity: 4,
+        status: 'reviewing',
+        gap_description: '能描述算法步骤，但无法解释贪心策略的正确性依赖非负权边的前提条件',
+        created_at: '2026-07-28T10:30:00',
+        active_review_id: 'review-a1b2c3d4',
+        action: 'continue'
+      },
+      {
+        gap_id: 'gap-review-2',
+        kp_id: 'kp-mst',
+        kp_name: '最小生成树',
+        dimension: '结构化能力',
+        score: 5,
+        severity: 4,
+        status: 'open',
+        gap_description: 'Kruskal和Prim算法的使用场景区分不清晰',
+        created_at: '2026-07-27T14:20:00',
+        active_review_id: null,
+        action: 'start'
+      }
+    ],
+    total: 2,
+    page: 1,
+    page_size: 20
+  }
+}

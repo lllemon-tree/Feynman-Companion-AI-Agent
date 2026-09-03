@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { v4 as uuidv4 } from 'uuid'
-import { chatWithAgent, fetchGreeting, resetFeynmanSession } from '@/api/feynman'
+import { chatWithAgent, fetchGreeting, resetFeynmanSession, getReviewResult } from '@/api/feynman'
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
@@ -16,7 +16,18 @@ export const useChatStore = defineStore('chat', {
     materialTitle: '',
     chapterId: '',
     chapterTitle: '',
-    subject: ''
+    subject: '',
+    // ===== 第八周 复习场景状态 =====
+    isReviewMode: false,
+    reviewId: '',
+    // 复习专用 session_id（来自 /reviews/start，后端据此加载复习上下文）
+    reviewSessionId: '',
+    baselineReportId: '',
+    targetGaps: /** @type {{gap_id: string, dimension: string, score: number, gap_description: string, review_count: number}[]} */ ([]),
+    // 复习重点维度（用于对话页提示，不暴露标准答案）
+    reviewFocusDimensions: /** @type {string[]} */ ([]),
+    // 复习结果（report 生成后通过 GET /reviews/{review_id} 拉取）
+    reviewResult: /** @type {object | null} */ (null)
   }),
 
   getters: {
@@ -50,21 +61,53 @@ export const useChatStore = defineStore('chat', {
       this.subject = subject
     },
 
+    /**
+     * 进入复习场景：设置复习上下文
+     * 由 ProfilePage 在调用 startReview 成功后调用
+     */
+    startReviewContext(payload) {
+      this.isReviewMode = true
+      this.reviewId = payload.review_id || ''
+      this.reviewSessionId = payload.session_id || ''
+      this.baselineReportId = payload.baseline_report_id || ''
+      this.targetGaps = payload.target_gaps || []
+      this.reviewFocusDimensions = (payload.target_gaps || []).map(g => g.dimension)
+      this.reviewResult = null
+    },
+
+    /**
+     * 初始化会话引导语
+     * 第八周：复习模式下使用 reviewSessionId，后端返回含重点维度的复习引导语
+     * 普通学习保持现有流程
+     */
     async bootstrap(kpId = null) {
       const savedKpId = kpId || this.kpId
       const savedKpName = this.kpName
       this.resetLocalState()
       this.kpId = savedKpId || ''
       this.kpName = savedKpName || ''
+      // 复习模式：使用 /reviews/start 返回的 session_id（PRD 6.2）
+      // 后端根据 session_id 查询 active review_attempt，加载目标漏洞和基线报告
+      if (this.isReviewMode && this.reviewSessionId) {
+        this.sessionId = this.reviewSessionId
+      }
       if (!this.kpId) {
         this.pushMessage('system', '未指定知识点，请先选择知识点。')
         return
       }
       try {
-        const greeting = await fetchGreeting(this.kpId)
+        // 复习模式传入 session_id，后端据此返回复习引导语
+        const greeting = await fetchGreeting(
+          this.kpId,
+          this.isReviewMode ? this.reviewSessionId : null
+        )
         if (greeting.kp_id) {
           this.kpId = greeting.kp_id
           this.kpName = greeting.kp_name || ''
+        }
+        // 复习引导语可能携带重点维度提示
+        if (this.isReviewMode && greeting.is_review) {
+          this.reviewFocusDimensions = greeting.review_focus_dimensions || this.reviewFocusDimensions
         }
         this.pushMessage('ai', greeting.reply_text)
       } catch (e) {
@@ -95,7 +138,11 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
-    handleAgentResponse(data) {
+    /**
+     * 处理 Agent 响应
+     * 第八周：报告生成后，若处于复习模式，自动拉取复习结果对比
+     */
+    async handleAgentResponse(data) {
       if (!data) {
         this.isLocked = false
         return
@@ -112,6 +159,15 @@ export const useChatStore = defineStore('chat', {
         this.reportData = {
           cardPreview: card_preview || null,
           finalReport: final_report || null
+        }
+        // 复习模式：后端生成报告并完成事务后，前端拉取复习结果对比
+        if (this.isReviewMode && this.reviewId) {
+          try {
+            this.reviewResult = await getReviewResult(this.reviewId)
+          } catch (e) {
+            // 复习结果拉取失败不阻断报告展示
+            this.errorMsg = e.message || '复习结果获取失败'
+          }
         }
       } else if (next_action === 'follow_up' || next_action === 'guide_topic') {
         this.isLocked = false
@@ -153,6 +209,7 @@ export const useChatStore = defineStore('chat', {
       this.isReportReady = false
       this.reportData = null
       this.errorMsg = ''
+      this.reviewResult = null
     },
 
     clearKnowledgeContext() {
@@ -163,6 +220,19 @@ export const useChatStore = defineStore('chat', {
       this.chapterId = ''
       this.chapterTitle = ''
       this.subject = ''
+    },
+
+    /**
+     * 退出复习场景：清空复习相关状态，回到普通学习模式
+     */
+    clearReviewContext() {
+      this.isReviewMode = false
+      this.reviewId = ''
+      this.reviewSessionId = ''
+      this.baselineReportId = ''
+      this.targetGaps = []
+      this.reviewFocusDimensions = []
+      this.reviewResult = null
     }
   }
 })
