@@ -403,7 +403,10 @@ export const MOCK_GAPS = {
         severity: 4,
         status: 'open',
         gap_description: '能描述算法步骤，但无法解释贪心策略的正确性依赖非负权边的前提条件',
-        created_at: '2026-07-28T10:30:00'
+        created_at: '2026-07-28T10:30:00',
+        review_count: 0,
+        last_reviewed_at: null,
+        next_review_at: '2026-09-09T10:00:00'
       },
       {
         gap_id: 'gap-demo-2',
@@ -414,7 +417,10 @@ export const MOCK_GAPS = {
         severity: 5,
         status: 'open',
         gap_description: '无法证明贪心选择性质，混淆算法正确性和反证法的逻辑',
-        created_at: '2026-07-28T10:30:00'
+        created_at: '2026-07-28T10:30:00',
+        review_count: 0,
+        last_reviewed_at: null,
+        next_review_at: '2026-09-10T10:00:00'
       },
       {
         gap_id: 'gap-demo-3',
@@ -425,7 +431,10 @@ export const MOCK_GAPS = {
         severity: 4,
         status: 'reviewing',
         gap_description: 'Kruskal和Prim算法的使用场景区分不清晰',
-        created_at: '2026-07-27T14:20:00'
+        created_at: '2026-07-27T14:20:00',
+        review_count: 1,
+        last_reviewed_at: '2026-09-08T14:00:00',
+        next_review_at: '2026-09-11T14:00:00'
       },
       {
         gap_id: 'gap-demo-4',
@@ -436,7 +445,10 @@ export const MOCK_GAPS = {
         severity: 3,
         status: 'resolved',
         gap_description: '对拓扑排序的应用场景（如任务调度）描述不够完整',
-        created_at: '2026-07-25T09:15:00'
+        created_at: '2026-07-25T09:15:00',
+        review_count: 2,
+        last_reviewed_at: '2026-09-01T09:00:00',
+        next_review_at: null
       }
     ],
     total: 4,
@@ -801,6 +813,9 @@ export const MOCK_REVIEW_DUE_GAPS_EXTENDED = {
         status: 'reviewing',
         gap_description: '能描述算法步骤，但无法解释贪心策略的正确性依赖非负权边的前提条件',
         created_at: '2026-07-28T10:30:00',
+        review_count: 1,
+        last_reviewed_at: '2026-09-08T14:00:00',
+        next_review_at: '2026-09-09T10:00:00',
         active_review_id: 'review-a1b2c3d4',
         action: 'continue'
       },
@@ -814,6 +829,9 @@ export const MOCK_REVIEW_DUE_GAPS_EXTENDED = {
         status: 'open',
         gap_description: 'Kruskal和Prim算法的使用场景区分不清晰',
         created_at: '2026-07-27T14:20:00',
+        review_count: 0,
+        last_reviewed_at: null,
+        next_review_at: '2026-09-09T10:00:00',
         active_review_id: null,
         action: 'start'
       }

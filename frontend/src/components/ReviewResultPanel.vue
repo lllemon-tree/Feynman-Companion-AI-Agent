@@ -1,5 +1,6 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import * as echarts from 'echarts'
 
 /**
  * 复习结果反馈组件（第八周 P0）
@@ -17,6 +18,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['back-to-profile', 'continue-learning'])
+
+const radarEl = ref(null)
+let radarInstance = null
 
 const kpName = computed(() => props.reviewResult?.kp_name || '当前知识点')
 
@@ -37,6 +41,91 @@ const continueList = computed(() =>
 const unchangedList = computed(() =>
   dimensionChanges.value.filter(d => d.result === 'unchanged')
 )
+
+// 迷你四维对比雷达图所需数据
+const radarDimensions = computed(() => {
+  return dimensionChanges.value.map(d => ({
+    name: d.dimension,
+    previous: d.previous_score ?? 0,
+    current: d.current_score ?? 0
+  }))
+})
+
+function renderRadar() {
+  if (!radarEl.value || radarDimensions.value.length === 0) return
+  if (!radarInstance) {
+    radarInstance = echarts.init(radarEl.value)
+  }
+  const indicators = radarDimensions.value.map(d => ({ name: d.name, max: 10 }))
+  const prevValues = radarDimensions.value.map(d => d.previous)
+  const currValues = radarDimensions.value.map(d => d.current)
+  radarInstance.setOption({
+    tooltip: { show: true, trigger: 'item' },
+    legend: {
+      data: ['上次', '本次'],
+      bottom: 0,
+      itemWidth: 12,
+      itemHeight: 8,
+      textStyle: { fontSize: 11, color: '#64748B' }
+    },
+    radar: {
+      indicator: indicators,
+      radius: '58%',
+      center: ['50%', '45%'],
+      splitNumber: 5,
+      axisName: { color: '#475569', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#E2E8F0' } },
+      splitArea: { areaStyle: { color: ['#F8FAFC', '#FFFFFF'] } },
+      axisLine: { lineStyle: { color: '#E2E8F0' } }
+    },
+    series: [
+      {
+        type: 'radar',
+        symbolSize: 5,
+        lineStyle: { width: 1.5 },
+        data: [
+          {
+            value: prevValues,
+            name: '上次',
+            lineStyle: { color: '#94A3B8' },
+            itemStyle: { color: '#94A3B8' },
+            areaStyle: { color: 'rgba(148, 163, 184, 0.15)' }
+          },
+          {
+            value: currValues,
+            name: '本次',
+            lineStyle: { color: '#2563EB', width: 2 },
+            itemStyle: { color: '#2563EB' },
+            areaStyle: { color: 'rgba(37, 99, 235, 0.2)' }
+          }
+        ]
+      }
+    ]
+  }, true)
+}
+
+onMounted(async () => {
+  await nextTick()
+  renderRadar()
+  window.addEventListener('resize', resizeRadar)
+})
+
+watch(() => props.reviewResult, async () => {
+  await nextTick()
+  renderRadar()
+}, { deep: true })
+
+function resizeRadar() {
+  radarInstance?.resize()
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeRadar)
+  if (radarInstance) {
+    radarInstance.dispose()
+    radarInstance = null
+  }
+})
 
 // 汇总信息：本次复习整体表现
 const summaryText = computed(() => {
@@ -133,6 +222,12 @@ function barWidth(score) {
 
       <!-- 已完成：展示维度变化 -->
       <div v-else class="changes-section">
+        <!-- 迷你四维对比雷达图（上次 vs 本次） -->
+        <div v-if="radarDimensions.length > 0" class="radar-compare-wrap">
+          <span class="radar-compare-title">四维得分对比</span>
+          <div ref="radarEl" class="radar-compare-chart"></div>
+        </div>
+
         <!-- 已掌握维度 -->
         <div v-if="masteredList.length > 0" class="change-group group-mastered">
           <div class="group-header">
@@ -379,6 +474,27 @@ function barWidth(score) {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+/* 迷你四维对比雷达图 */
+.radar-compare-wrap {
+  padding: 14px;
+  background: #F8FAFC;
+  border: 1px solid #E2E8F0;
+  border-radius: 10px;
+}
+
+.radar-compare-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1E293B;
+  margin-bottom: 8px;
+}
+
+.radar-compare-chart {
+  width: 100%;
+  height: 220px;
 }
 
 .group-header {
