@@ -30,11 +30,13 @@ from backend.app.services.session_store import (
     SessionState,
     SessionStore,
 )
-from sqlalchemy.orm import Session
-from backend.app.services.user_profile_service import UserProfileService
-from backend.app.models.review_context import ReviewContext, TargetGap
+from backend.app.services.review_context_service import DefaultReviewContextProvider
 
 logger = logging.getLogger(__name__)
+
+
+class ReviewPersistenceError(Exception):
+    """Review result was generated but its atomic database write failed."""
 
 
 class FeynmanService:
@@ -80,18 +82,8 @@ class FeynmanService:
         if session.ended and session.final_response is not None:
             self._finalize_report_safely(session, session.final_response)
             return session.final_response
-        # 尝试获取用户画像（如果是游客 GUEST_USER_ID 则跳过）
-        profile = None
-        if user_id != GUEST_USER_ID:
-            try:
-                # 使用现有的 engine 开启一个简短的数据库会话
-                with Session(engine) as db:
-                    profile = UserProfileService.get_profile_by_user_id(db, user_id)
-            except Exception as e:
-                logger.warning(f"Failed to fetch user profile for {user_id}: {e}")
-
-        # 将 profile 传给 graph.run
-        response = await self._graph.run(request=request, session=session, profile=profile)
+        # Graph 的 load_context 节点统一加载画像，避免在两层重复查库。
+        response = await self._graph.run(request=request, session=session)
         self._store.save(session)
         self._finalize_report_safely(session, response)
         return response
@@ -108,6 +100,11 @@ class FeynmanService:
                 "diagnostic report persistence failed for session %s",
                 session.session_id,
             )
+            if (
+                isinstance(self._report_finalizer, DiagnosticReportFinalizer)
+                and self._report_finalizer.is_review_session(session)
+            ):
+                raise ReviewPersistenceError("复习结果暂未保存，请重试")
 
     def greeting(self, kp_id: Optional[str] = None, session_id: Optional[str] = None, user_id: str = GUEST_USER_ID) -> GreetingData:
         knowledge_point = self._kp_provider.get(kp_id or DEFAULT_KP_ID)
@@ -125,7 +122,7 @@ class FeynmanService:
             review_context = safe_load_review_context(provider, session_id, user_id)
 
             # 拼接greeting文本，提示用户进入复习模式
-            if review_context:
+            if review_context and review_context.kp_id == knowledge_point.kp_id:
                 is_review = True
                 review_focus = review_context.review_focus
                 focus_str = "、".join(review_focus)
@@ -227,7 +224,7 @@ def get_feynman_service() -> FeynmanService:
         fallback_client=MockLLMClient(),
         report_finalizer=DiagnosticReportFinalizer(engine),
         profile_provider=_load_profile_from_db,
-        review_context_provider=TemporaryTestReviewContextProvider(),  # 注入测试Provider
+        review_context_provider=DefaultReviewContextProvider(engine),
     )
 
 
@@ -239,26 +236,3 @@ def _load_profile_from_db(user_id: str):
 
     with Session(engine) as db:
         return UserProfileService.get_profile_by_user_id(db, user_id)
-
-
-class TemporaryTestReviewContextProvider:
-    """临时测试用的 ReviewContextProvider，用于本地 Swagger 联调"""
-    def load_review_context(self, session_id: str, user_id: str) -> Optional[ReviewContext]:
-        # 如果你指定的测试 session_id 匹配，就返回模拟的复习上下文
-        if session_id == "session-test-review":
-            return ReviewContext(
-                gap_id="gap-mock-001",
-                kp_id="kp-1f4e7ef4",
-                kp_name="Dijkstra算法",
-                review_focus=["理解深度", "逻辑连贯性"],
-                target_gap=TargetGap(
-                    gap_id="gap-mock-001",
-                    kp_id="kp-1f4e7ef4",
-                    kp_name="Dijkstra算法",
-                    weak_dimensions=["理解深度"],
-                    gap_desc="未解释贪心选择为什么在边权非负时一定成立",
-                    previous_scores={"理解深度": 4, "逻辑连贯性": 5}
-                ),
-                previous_report_summary="核心步骤正确，但缺少正确性直觉的数学解释。"
-            )
-        return None

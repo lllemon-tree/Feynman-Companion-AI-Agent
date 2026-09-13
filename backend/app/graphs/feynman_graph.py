@@ -113,7 +113,10 @@ class FeynmanGraph:
         # 开场先加载用户画像（游客或无 provider 时返回 None，安全降级为默认 Prompt）
         profile = None
         if self._profile_provider is not None:
-            profile = self._profile_provider(session.user_id)
+            try:
+                profile = self._profile_provider(session.user_id)
+            except Exception:
+                profile = None
         # 如果 request 里传了 kp_id，且和 session 里原来的 kp_id 不同，且 session 已经有聊天记录了，就报错
         # 这是为了防止用户在中途切换知识点时，原来的聊天记录和新的知识点不匹配，导致模型生成的回答不合理。
         if request.kp_id and session.kp_id and request.kp_id != session.kp_id and session.messages:
@@ -143,6 +146,8 @@ class FeynmanGraph:
             session_id=session.session_id,
             user_id=session.user_id,
         )
+        if review_context is not None and review_context.kp_id != kp_id:
+            raise ValueError("review session is bound to another kp_id")
         # 5. 将复习上下文对象存入 state，供后续节点使用
         state["review_context"] = review_context
         return {"knowledge_point": knowledge_point, "user_profile": profile, "review_context": review_context}

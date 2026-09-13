@@ -6,6 +6,7 @@ from backend.app.core.database import get_session
 from backend.app.api.dependencies import require_current_user, CurrentActor
 from backend.app.models.knowledge_gap import KnowledgeGapStatus, KnowledgeGapUpdate
 from backend.app.services.knowledge_gap_service import KnowledgeGapService
+from backend.app.services.knowledge_gap_service import ActiveReviewConflict
 
 # 实例化 APIRouter，指定路由统一前缀为 /gaps，Swagger 标签分类为 KnowledgeGap
 router = APIRouter(prefix="/gaps", tags=["KnowledgeGap"])
@@ -87,9 +88,14 @@ def update_gap_status(
 ):
     """PATCH /api/v1/gaps/{gap_id} — 更新漏洞状态（如标记复习中/已掌握）[cite: 1, 3]"""
     # 调用 Service 层执行状态更新操作[cite: 1, 3]
-    result = KnowledgeGapService.update_gap_status(
-        session, actor.user_id, gap_id, gap_in
-    )
+    try:
+        result = KnowledgeGapService.update_gap_status(
+            session, actor.user_id, gap_id, gap_in
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ActiveReviewConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     # 若漏洞不存在或不属于当前用户，抛出 404 异常
     if not result:
         raise HTTPException(status_code=404, detail="漏洞不存在或无使用权限")

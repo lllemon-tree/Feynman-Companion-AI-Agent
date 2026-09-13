@@ -1,4 +1,5 @@
-from datetime import datetime, time, timedelta
+import json
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from sqlmodel import Session, func, select
@@ -7,9 +8,17 @@ from backend.app.models.knowledge_gap import (
     KnowledgeGap,
     KnowledgeGapUpdate,
 )
+from backend.app.models.review_attempt import ReviewAttempt
+from backend.app.services.review_rules import (
+    SRS_INTERVAL_DAYS,
+    is_mastered,
+    next_review_at,
+    severity_for_score,
+)
 
 
-SRS_INTERVAL_DAYS = (1, 3, 7, 14, 30)
+class ActiveReviewConflict(Exception):
+    pass
 
 
 class KnowledgeGapService:
@@ -17,15 +26,7 @@ class KnowledgeGapService:
 
     @staticmethod
     def calculate_severity(score: int) -> int:
-        """依据 PRD 规则，根据维度得分计算严重程度 severity (1-5)[cite: 1, 3]"""
-        if score <= 3:
-            return 5  # 0-3分映射为 severity 5（最严重）[cite: 1, 3]
-        elif score <= 5:
-            return 4  # 4-5分映射为 severity 4[cite: 1, 3]
-        elif score == 6:
-            return 3  # 6分映射为 severity 3[cite: 1, 3]
-        else:
-            return 1  # 预留：更高分默认为较低严重程度
+        return severity_for_score(score)
 
     @staticmethod
     def srs_interval_days(review_count: int) -> int:
@@ -40,11 +41,7 @@ class KnowledgeGapService:
         reviewed_at: datetime,
     ) -> datetime:
         """Calculate the next review time using the 1/3/7/14/30-day schedule."""
-        try:
-            interval_days = KnowledgeGapService.srs_interval_days(review_count)
-        except Exception:
-            interval_days = 1
-        return reviewed_at + timedelta(days=interval_days)
+        return next_review_at(review_count, reviewed_at)
 
     @staticmethod
     def upsert_gap_from_report(
@@ -58,7 +55,7 @@ class KnowledgeGapService:
         score: int,
         gap_description: Optional[str],
         source_session_id: Optional[str] = None,
-    ) -> KnowledgeGap:
+    ) -> Optional[KnowledgeGap]:
         """对话报告后置钩子调用的自动入库/去重更新方法（后端 B 集成使用）[cite: 1, 2]"""
         # 1. 游客用户跳过漏洞入库[cite: 1, 3]
         if user_id == "guest":
@@ -72,9 +69,23 @@ class KnowledgeGapService:
             KnowledgeGap.user_id == user_id,
             KnowledgeGap.kp_id == kp_id,
             KnowledgeGap.dimension == dimension,
-            KnowledgeGap.status == "open",
         )
         existing_gap = session.exec(statement).first()
+
+        if is_mastered(score):
+            if existing_gap is None:
+                return None
+            existing_gap.score = score
+            existing_gap.severity = severity_val
+            existing_gap.status = "resolved"
+            existing_gap.resolved_at = now_iso
+            existing_gap.resolution_source = "assessment"
+            existing_gap.next_review_at = None
+            existing_gap.updated_at = now_iso
+            session.add(existing_gap)
+            session.commit()
+            session.refresh(existing_gap)
+            return existing_gap
 
         if existing_gap:
             # 3. 存在 open 漏洞则仅更新分数、严重程度、描述和更新时间[cite: 1, 3]
@@ -83,6 +94,11 @@ class KnowledgeGapService:
             if gap_description:
                 existing_gap.gap_description = gap_description
             existing_gap.updated_at = now_iso
+            if existing_gap.status == "resolved" and not is_mastered(score):
+                existing_gap.status = "open"
+                existing_gap.resolved_at = None
+                existing_gap.resolution_source = None
+                existing_gap.next_review_at = next_review_at(0, datetime.now()).isoformat()
             session.add(existing_gap)
             session.commit()
             session.refresh(existing_gap)
@@ -100,6 +116,7 @@ class KnowledgeGapService:
                 severity=severity_val,
                 score=score,
                 status="open",
+                next_review_at=next_review_at(0, datetime.now()).isoformat(),
                 source_session_id=source_session_id,
                 created_at=now_iso,
                 updated_at=now_iso,
@@ -152,7 +169,9 @@ class KnowledgeGapService:
         gap_in: KnowledgeGapUpdate,
         now: Optional[datetime] = None,
     ) -> Optional[Dict[str, Any]]:
-        """更新漏洞状态（例如标记为 reviewing 或 resolved）[cite: 1, 3]"""
+        """Only manual open/resolved transitions; review start uses /reviews/start."""
+        if gap_in.status == "reviewing":
+            raise ValueError("cannot patch to reviewing directly, use /reviews/start")
         statement = select(KnowledgeGap).where(
             KnowledgeGap.id == gap_id, KnowledgeGap.user_id == user_id
         )
@@ -161,23 +180,23 @@ class KnowledgeGapService:
         if not gap:
             return None
 
+        active = session.exec(select(ReviewAttempt).where(
+            ReviewAttempt.user_id == user_id,
+            ReviewAttempt.kp_id == gap.kp_id,
+            ReviewAttempt.status == "active",
+        )).all()
+        if any(gap_id in json.loads(item.target_gap_ids or "[]") for item in active for gap_id in [gap.id]):
+            raise ActiveReviewConflict("gap is in an active review, complete the review first")
+
         reviewed_at = now or datetime.now()
 
         # 更新状态与修改时间
         gap.status = gap_in.status
         gap.updated_at = reviewed_at.isoformat()
 
-        # 每次开始复习都递增次数，并按 1/3/7/14/30 天安排下一次复习。
-        if gap_in.status == "reviewing":
-            gap.review_count += 1
-            gap.last_reviewed_at = reviewed_at.isoformat()
-            gap.next_review_at = KnowledgeGapService.calculate_next_review_at(
-                gap.review_count,
-                reviewed_at,
-            ).isoformat()
-        else:
-            # open/resolved 不应出现在今日待复习列表中。
-            gap.next_review_at = None
+        gap.next_review_at = None
+        gap.resolved_at = reviewed_at.isoformat() if gap_in.status == "resolved" else None
+        gap.resolution_source = "manual" if gap_in.status == "resolved" else None
 
         session.add(gap)
         session.commit()
@@ -189,6 +208,8 @@ class KnowledgeGapService:
             "review_count": gap.review_count,
             "last_reviewed_at": gap.last_reviewed_at,
             "next_review_at": gap.next_review_at,
+            "resolved_at": gap.resolved_at,
+            "resolution_source": gap.resolution_source,
         }
 
     @staticmethod
@@ -197,28 +218,44 @@ class KnowledgeGapService:
         user_id: str,
         now: Optional[datetime] = None,
     ) -> Dict[str, Any]:
-        """Return all reviewing gaps scheduled on or before the current day."""
-        current = now or datetime.now()
-        end_of_today = datetime.combine(
-            current.date(),
-            time.max,
-            tzinfo=current.tzinfo,
-        ).isoformat()
+        """Return gaps due by local calendar day, including legacy naive timestamps."""
+        local_timezone = datetime.now().astimezone().tzinfo
+        current = now or datetime.now().astimezone()
+        today = current.astimezone(local_timezone).date() if current.tzinfo else current.date()
         query = (
             select(KnowledgeGap)
             .where(
                 KnowledgeGap.user_id == user_id,
-                KnowledgeGap.status == "reviewing",
+                KnowledgeGap.status.in_(["open", "reviewing"]),
                 KnowledgeGap.next_review_at.is_not(None),
-                KnowledgeGap.next_review_at <= end_of_today,
-            )
-            .order_by(
-                KnowledgeGap.severity.desc(),
-                KnowledgeGap.next_review_at.asc(),
             )
         )
-        gaps = session.exec(query).all()
+        gaps = []
+        for gap in session.exec(query).all():
+            try:
+                scheduled = datetime.fromisoformat(gap.next_review_at)
+            except (TypeError, ValueError):
+                continue
+            due_date = (
+                scheduled.astimezone(local_timezone).date()
+                if scheduled.tzinfo else scheduled.date()
+            )
+            if due_date <= today:
+                gaps.append(gap)
+        gaps.sort(key=lambda gap: (-gap.severity, gap.next_review_at))
         items = [KnowledgeGapService._gap_to_dict(gap) for gap in gaps]
+        active = session.exec(select(ReviewAttempt).where(
+            ReviewAttempt.user_id == user_id,
+            ReviewAttempt.status == "active",
+        )).all()
+        active_by_gap = {
+            gap_id: attempt.id
+            for attempt in active
+            for gap_id in json.loads(attempt.target_gap_ids or "[]")
+        }
+        for item in items:
+            item["active_review_id"] = active_by_gap.get(item["gap_id"])
+            item["action"] = "continue" if item["active_review_id"] else "start"
         return {
             "items": items,
             "total": len(items),
@@ -274,6 +311,8 @@ class KnowledgeGapService:
             "review_count": gap.review_count,
             "last_reviewed_at": gap.last_reviewed_at,
             "next_review_at": gap.next_review_at,
+            "resolved_at": gap.resolved_at,
+            "resolution_source": gap.resolution_source,
             "created_at": gap.created_at,
             "updated_at": gap.updated_at,
         }

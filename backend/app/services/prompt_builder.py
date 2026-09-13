@@ -162,15 +162,13 @@ def build_system_prompt(
     ],
     "related_kps": [
       {{ "kp_id": "关联的id", "kp_name": "知识点名称", "relation": "关系说明" }}
-    ],
-    "priority_order": [
-      {{ "rank": 1, "dimension": "薄弱维度名称", "kp_name": "知识点名称", "suggestion": "具体的复习建议" }}
     ]
   }}
 }}
 
 当 next_action 为 follow_up 或 guide_topic 时，card_preview、final_report 和 review_plan 必须为 null。
 当 next_action 为 generate_report 时，这三个字段必须为完整对象，基于用户的答题表现自动生成个性化复习计划。
+复习建议只在 reread_guide 中给出，按 priority 排序，不输出 priority_order 或重复的套话。
 """.strip()
 
 # ==========================================
@@ -222,10 +220,17 @@ def _build_review_instructions(review_context: Optional[ReviewContext]) -> str:
         return ""
     
     focus_str = "、".join(review_context.review_focus)
+    previous_scores = review_context.target_gap.previous_scores or {}
+    score_summary = "、".join(
+        f"{name} {score} 分" for name, score in previous_scores.items()
+    ) or "暂无完整上次评分"
     return f"""
 【专项复习要求（来自历史诊断）】
 - 上次漏洞描述：{review_context.target_gap.gap_desc}
 - 本次重点考察维度：{focus_str}
 - 上次薄弱维度：{", ".join(review_context.target_gap.weak_dimensions)}
-请在本次对话和评估中，重点引导用户攻克上述薄弱环节，并在追问时进行针对性检验。
+- 上次四维得分：{score_summary}
+- 上次报告摘要：{review_context.previous_report_summary or "暂无"}
+请优先针对薄弱维度提问，验证用户是否真的补足了上次遗漏；不要泄露标准答案。
+最终报告只给出本次四维分数和解释，不要自行计算分差或掌握状态；对比由后端根据已保存的两份报告计算。
 """

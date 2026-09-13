@@ -33,6 +33,9 @@ from backend.app.models.feynman import (
     ReviewPlan,
 )
 from backend.app.models.knowledge import Material
+from backend.app.models.review_attempt import ReviewAttempt
+from backend.app.services.review_rules import is_mastered, next_review_at, severity_for_score
+from backend.app.services.review_service import finalize_review
 from backend.app.services.session_store import SessionState
 
 
@@ -82,14 +85,13 @@ class ReflectiveKnowledgeGapWriter:
         with Session(engine) as db:
             synced = 0
             for dimension in dimensions:
-                existing_id = db.execute(
-                    sa_select(gap_table.c.id).where(
+                existing = db.execute(
+                    sa_select(gap_table.c.id, gap_table.c.status).where(
                         gap_table.c.user_id == context.user_id,
                         gap_table.c.kp_id == context.kp_id,
                         gap_table.c.dimension == dimension.name,
-                        gap_table.c.status == "open",
-                    )
-                ).scalar_one_or_none()
+                    ).order_by(gap_table.c.created_at.desc())
+                ).first()
 
                 values = {
                     "score": dimension.score,
@@ -100,13 +102,36 @@ class ReflectiveKnowledgeGapWriter:
                     "material_name": context.material_name,
                     "updated_at": timestamp_values["updated_at"],
                 }
-                if existing_id is not None:
+                if is_mastered(dimension.score):
+                    if existing is not None:
+                        values["status"] = "resolved"
+                        values["next_review_at"] = None
+                        if "resolved_at" in gap_table.c:
+                            values["resolved_at"] = _timestamp_for(gap_table.c.resolved_at, now)
+                        if "resolution_source" in gap_table.c:
+                            values["resolution_source"] = "assessment"
+                        db.execute(update(gap_table).where(gap_table.c.id == existing.id).values(**values))
+                    continue
+
+                if existing is not None:
+                    if existing.status == "resolved":
+                        values["status"] = "open"
+                        values["next_review_at"] = _timestamp_for(
+                            gap_table.c.next_review_at, next_review_at(0, now)
+                        )
+                        if "resolved_at" in gap_table.c:
+                            values["resolved_at"] = None
+                        if "resolution_source" in gap_table.c:
+                            values["resolution_source"] = None
                     db.execute(
                         update(gap_table)
-                        .where(gap_table.c.id == existing_id)
+                        .where(gap_table.c.id == existing.id)
                         .values(**values)
                     )
                 else:
+                    values["next_review_at"] = _timestamp_for(
+                        gap_table.c.next_review_at, next_review_at(0, now)
+                    )
                     db.execute(
                         insert(gap_table).values(
                             id=f"gap-{uuid4().hex[:12]}",
@@ -151,6 +176,15 @@ class DiagnosticReportFinalizer:
         self._engine = engine
         self._gap_writer = gap_writer or ReflectiveKnowledgeGapWriter()
 
+    def is_review_session(self, session_state: SessionState) -> bool:
+        if not inspect(self._engine).has_table("review_attempt"):
+            return False
+        with Session(self._engine) as db:
+            return db.exec(select(ReviewAttempt).where(
+                ReviewAttempt.session_id == session_state.session_id,
+                ReviewAttempt.user_id == session_state.user_id,
+            )).first() is not None
+
     def finalize(
         self,
         session_state: SessionState,
@@ -175,17 +209,25 @@ class DiagnosticReportFinalizer:
             material_id=session_state.material_id,
             material_name=material_name,
         )
-        low_score_dimensions = [
-            dimension
-            for dimension in response.final_report.dimensions
-            if dimension.score <= 6
-        ]
+        if self.is_review_session(session_state):
+            return finalize_review(
+                self._engine,
+                session_state,
+                response,
+                material_name,
+            )
 
+        with Session(self._engine) as db:
+            existing = db.exec(select(DiagnosticReport).where(
+                DiagnosticReport.session_id == context.session_id
+            )).first()
+            if existing is not None:
+                return existing
         try:
             gaps_identified = self._gap_writer.sync(
                 self._engine,
                 context,
-                low_score_dimensions,
+                response.final_report.dimensions,
             )
         except Exception:
             gaps_identified = 0
@@ -259,14 +301,6 @@ class DiagnosticReportFinalizer:
             db.commit()
             db.refresh(report)
             return report
-
-
-def severity_for_score(score: int) -> int:
-    if score <= 3:
-        return 5
-    if score <= 5:
-        return 4
-    return 3
 
 
 def list_reports(
