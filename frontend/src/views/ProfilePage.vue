@@ -36,6 +36,19 @@ const reviewStartingKpId = ref('')
 // 标记是否从对话页返回（返回后需要刷新漏洞/统计）
 const needRefreshOnReturn = ref(false)
 
+// 轻量 toast 提示（用于「继续上次复习」等短暂通知）
+const toastText = ref('')
+const toastVisible = ref(false)
+let toastTimer = null
+function showToast(msg, duration = 2200) {
+  toastText.value = msg
+  toastVisible.value = true
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => {
+    toastVisible.value = false
+  }, duration)
+}
+
 // 学情统计
 const userStats = ref(null)
 const loadingUserStats = ref(false)
@@ -65,6 +78,10 @@ async function startReviewKp(group) {
     reviewStartingKpId.value = group.kp_id
     try {
       const reviewData = await startReview(group.kp_id, 'gap')
+      // 恢复已有复习记录时给出提示
+      if (reviewData.resumed) {
+        showToast('继续上次复习')
+      }
       // 设置 chatStore 复习上下文（reviewId/sessionId/targetGaps 等）
       chatStore.clearReviewContext()
       chatStore.clearKnowledgeContext()
@@ -120,6 +137,9 @@ async function startDueReview(gap) {
   reviewStartingKpId.value = gap.kp_id
   try {
     const reviewData = await startReview(gap.kp_id, 'due')
+    if (reviewData.resumed) {
+      showToast('继续上次复习')
+    }
     chatStore.clearReviewContext()
     chatStore.clearKnowledgeContext()
     chatStore.setKnowledgePoint(gap.kp_id, gap.kp_name)
@@ -158,7 +178,10 @@ const groupedGaps = computed(() => {
       severity: gap.severity,
       gap_description: gap.gap_description,
       status: gap.status,
-      created_at: gap.created_at
+      created_at: gap.created_at,
+      review_count: gap.review_count,
+      last_reviewed_at: gap.last_reviewed_at,
+      next_review_at: gap.next_review_at
     })
     if (gap.status === 'open' && grouped[gap.kp_id].status !== 'open') {
       grouped[gap.kp_id].status = 'open'
@@ -753,6 +776,21 @@ onActivated(() => {
                 <span class="review-score-max">/ 10</span>
               </div>
               <p class="review-gap-desc">{{ gap.gap_description }}</p>
+              <div class="review-gap-meta">
+                <span
+                  v-if="formatNextReview(gap.next_review_at)"
+                  class="review-time-tag"
+                  :class="{ 'review-time--overdue': isOverdue(gap.next_review_at) }"
+                >
+                  {{ formatNextReview(gap.next_review_at) }}
+                </span>
+                <span
+                  v-if="gap.status === 'reviewing' && formatLastReviewed(gap.last_reviewed_at)"
+                  class="last-review-tag"
+                >
+                  {{ formatLastReviewed(gap.last_reviewed_at) }}
+                </span>
+              </div>
               <button
                 class="review-action-btn"
                 :disabled="reviewStarting && reviewStartingKpId === gap.kp_id"
@@ -862,6 +900,22 @@ onActivated(() => {
                   ></div>
                 </div>
                 <p class="dim-desc" v-if="dim.gap_description">{{ dim.gap_description }}</p>
+                <div class="dim-review-meta">
+                  <span
+                    v-if="dim.status !== 'resolved' && formatNextReview(dim.next_review_at)"
+                    class="review-time-tag"
+                    :class="{ 'review-time--overdue': isOverdue(dim.next_review_at) }"
+                  >
+                    {{ formatNextReview(dim.next_review_at) }}
+                  </span>
+                  <span
+                    v-if="dim.status === 'reviewing' && formatLastReviewed(dim.last_reviewed_at)"
+                    class="last-review-tag"
+                  >
+                    {{ formatLastReviewed(dim.last_reviewed_at) }}
+                  </span>
+                  <span v-if="dim.review_count" class="review-count-tag">已复习 {{ dim.review_count }} 次</span>
+                </div>
               </div>
 
               <div class="gap-card-actions">
@@ -1211,6 +1265,17 @@ onActivated(() => {
         </div>
       </div>
     </div>
+
+    <!-- 轻量 Toast 提示 -->
+    <Transition name="toast-fade">
+      <div v-if="toastVisible" class="profile-toast">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <span>{{ toastText }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -1241,6 +1306,37 @@ export default {
         hour: '2-digit',
         minute: '2-digit'
       })
+    },
+    /**
+     * 格式化下次复习时间：「下次复习：X月X日 · 剩余X天」
+     * 逾期天数用负值/红字标识
+     */
+    formatNextReview(dateStr) {
+      if (!dateStr) return null
+      const target = new Date(dateStr)
+      const now = new Date()
+      const month = target.getMonth() + 1
+      const day = target.getDate()
+      const diffMs = target.getTime() - now.getTime()
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+      let remainText
+      if (diffDays > 0) {
+        remainText = `剩余 ${diffDays} 天`
+      } else if (diffDays === 0) {
+        remainText = '今天到期'
+      } else {
+        remainText = `已逾期 ${Math.abs(diffDays)} 天`
+      }
+      return `下次复习：${month}月${day}日 · ${remainText}`
+    },
+    isOverdue(dateStr) {
+      if (!dateStr) return false
+      return new Date(dateStr).getTime() < Date.now()
+    },
+    formatLastReviewed(dateStr) {
+      if (!dateStr) return null
+      const d = new Date(dateStr)
+      return `上次复习：${d.getMonth() + 1}月${d.getDate()}日`
     }
   }
 }
@@ -1716,6 +1812,56 @@ export default {
   color: #64748B;
   line-height: 1.5;
   margin: 0 0 12px;
+}
+
+.review-gap-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.dim-review-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.review-time-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563EB;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.review-time-tag.review-time--overdue {
+  background: rgba(239, 68, 68, 0.1);
+  color: #DC2626;
+}
+
+.last-review-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: #F1F5F9;
+  color: #64748B;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.review-count-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+  border-radius: 6px;
+  font-size: 11px;
 }
 
 .review-action-btn {
@@ -2672,5 +2818,35 @@ export default {
   .profile-sidebar {
     width: 100%;
   }
+}
+
+/* 轻量 Toast */
+.profile-toast {
+  position: fixed;
+  top: 72px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: rgba(15, 23, 42, 0.92);
+  color: #FFFFFF;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  z-index: 200;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.toast-fade-enter-from,
+.toast-fade-leave-to {
+  opacity: 0;
+  transform: translate(-50%, -8px);
+}
+
+.toast-fade-enter-active,
+.toast-fade-leave-active {
+  transition: opacity 200ms ease, transform 200ms ease;
 }
 </style>

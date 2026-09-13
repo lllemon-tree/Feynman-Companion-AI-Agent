@@ -27,6 +27,8 @@ const uploadError = ref('')
 const dropZoneActive = ref(false)
 const fileInput = ref(null)
 const dragCounterRef = ref(0)
+// 两步式上传：选中文件后先暂存，用户点击「上传」按钮才真正发起上传
+const pendingFile = ref(null)
 
 const toastMessage = ref('')
 const showToast = ref(false)
@@ -126,7 +128,27 @@ function validateAndUpload(file) {
     uploadError.value = '文件超过50MB大小限制'
     return
   }
-  startUpload(file)
+  // 两步式：校验通过后暂存文件，等待用户点击「上传」按钮
+  uploadError.value = ''
+  pendingFile.value = file
+}
+
+/**
+ * 确认上传：用户点击显式「上传」按钮后才真正发起上传
+ * 教材名称为必填项，为空时禁用按钮并提示
+ */
+async function confirmUpload() {
+  if (!pendingFile.value || isUploading.value) return
+  if (!nameInput.value.trim()) {
+    uploadError.value = '请先填写教材名称'
+    return
+  }
+  await startUpload(pendingFile.value)
+}
+
+function clearPendingFile() {
+  pendingFile.value = null
+  uploadError.value = ''
 }
 
 async function startUpload(file) {
@@ -156,6 +178,8 @@ async function startUpload(file) {
     }
     materials.value.unshift(newMaterial)
     startStatusPolling(newMaterial.id)
+    // 上传成功后清空待上传文件
+    pendingFile.value = null
   } catch (e) {
     isUploading.value = false
     uploadError.value = e.message || '上传失败，请重试'
@@ -329,13 +353,17 @@ function handleProfileSaved() {
     <main class="upload-main">
       <h1 class="main-title">上传教材PDF</h1>
       <label class="name-field">
-        <span>教材名称</span>
+        <span>教材名称 <span class="required-mark">*</span></span>
         <input
           v-model="nameInput"
           type="text"
-          placeholder="留空则使用PDF文件名"
+          placeholder="请输入教材名称（必填）"
           :disabled="isUploading"
+          :class="{ 'input-error': !nameInput.trim() && pendingFile }"
         />
+        <span v-if="!nameInput.trim() && pendingFile" class="name-hint name-hint--error">
+          教材名称为必填项
+        </span>
       </label>
 
       <div
@@ -385,6 +413,37 @@ function handleProfileSaved() {
           <div class="drop-text">拖拽教材PDF到此处 / 点击选择文件</div>
           <div class="drop-hint">仅支持文字版PDF文件，文件大小上限50MB</div>
         </template>
+      </div>
+
+      <!-- 两步式上传：选中文件后展示待上传卡片，点击「上传」才真正发起 -->
+      <div v-if="pendingFile && !isUploading" class="pending-file-card">
+        <div class="pending-file-info">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+          </svg>
+          <div class="pending-file-text">
+            <span class="pending-file-name">{{ pendingFile.name }}</span>
+            <span class="pending-file-size">{{ (pendingFile.size / 1024 / 1024).toFixed(2) }} MB</span>
+          </div>
+        </div>
+        <div class="pending-file-actions">
+          <button
+            class="confirm-upload-btn"
+            :disabled="!nameInput.trim()"
+            @click="confirmUpload"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            上传
+          </button>
+          <button class="cancel-pending-btn" @click="clearPendingFile">重新选择</button>
+        </div>
       </div>
 
       <div v-if="uploadError" class="upload-error">
@@ -634,6 +693,11 @@ function handleProfileSaved() {
   font-weight: 600;
 }
 
+.required-mark {
+  color: #EF4444;
+  margin-left: 2px;
+}
+
 .name-field input {
   width: 100%;
   padding: 11px 13px;
@@ -647,6 +711,19 @@ function handleProfileSaved() {
   transition: border-color 150ms, box-shadow 150ms;
 }
 
+.name-field input.input-error {
+  border-color: #EF4444;
+}
+
+.name-hint {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.name-hint--error {
+  color: #DC2626;
+}
+
 .name-field input:focus {
   border-color: #2563EB;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
@@ -655,6 +732,94 @@ function handleProfileSaved() {
 .name-field input:disabled {
   background: #F1F5F9;
   color: #94A3B8;
+}
+
+/* 待上传文件卡片 */
+.pending-file-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #FFFFFF;
+  border: 1px solid #2563EB;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+}
+
+.pending-file-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: #2563EB;
+}
+
+.pending-file-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.pending-file-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1E293B;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pending-file-size {
+  font-size: 12px;
+  color: #64748B;
+}
+
+.pending-file-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.confirm-upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  background: #2563EB;
+  color: #FFFFFF;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.confirm-upload-btn:hover:not(:disabled) {
+  background: #1D4ED8;
+}
+
+.confirm-upload-btn:disabled {
+  background: #94A3B8;
+  cursor: not-allowed;
+}
+
+.cancel-pending-btn {
+  padding: 8px 14px;
+  background: #F1F5F9;
+  color: #475569;
+  border: 1px solid #E2E8F0;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms;
+}
+
+.cancel-pending-btn:hover {
+  background: #E2E8F0;
 }
 
 .drop-zone {
