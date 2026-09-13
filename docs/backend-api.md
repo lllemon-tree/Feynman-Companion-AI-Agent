@@ -410,6 +410,58 @@ Authorization: Bearer <token>
 }
 ```
 
+## 10. 第九周复习闭环
+
+以下接口仅供已登录用户使用。前端开发环境须设置
+`VITE_USE_FEYNMAN_MOCK=false`，否则看到的是浏览器内存 Mock，不是落库结果。
+
+### 10.1 开始或继续复习
+
+```http
+POST /api/v1/reviews/start
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"kp_id":"kp-demo","source":"gap"}
+```
+
+`source` 只接受 `gap` 或 `due`。成功响应的 `data` 包含
+`review_id`、`session_id`、`kp_id`、`kp_name`、`baseline_report_id`、
+`status=active`、`resumed` 和 `target_gaps`。同一用户同一知识点已有 active
+复习时，返回原记录且 `resumed=true`；没有未解决漏洞时返回 HTTP 409，
+`msg=no unresolved gaps`。点击开始不会增加 `review_count`。
+
+复习对话继续调用 `/feynman/chat`，但必须使用这里返回的 `session_id` 和同一个
+`kp_id`。引导语可调用
+`GET /api/v1/feynman/greeting?kp_id=...&session_id=...`，复习场景返回
+`is_review=true` 与 `review_focus`，不暴露标准答案。
+
+### 10.2 复习结果
+
+```http
+GET /api/v1/reviews/{review_id}
+Authorization: Bearer <token>
+```
+
+active 时 `result_report_id=null`、`dimension_changes=[]`、`action=continue`。
+完成后 `dimension_changes` 的每项含 `dimension`、`previous_score`、
+`current_score`、`delta`、`result`、`gap_id`、`gap_status`、
+`review_count`、`next_review_at`。目标维度的 `result` 为 `mastered` 或
+`continue`，非目标维度为 `unchanged`；这些值由后端从报告计算并在完成时
+保存快照，历史结果不会随以后复习而改变。其他用户的 review 返回 404。
+
+### 10.3 漏洞与到期提醒
+
+- 单维度 0～6 分未掌握，7～10 分已掌握。首次低分报告给 open 漏洞安排 1 天后的首次复习；`/gaps/review-due` 返回今天到期的 open/reviewing 漏洞，并在每项附带 `active_review_id` 和 `action=start|continue`。
+- 只有复习会话生成并成功保存新报告，目标漏洞的 `review_count` 才增加 1；未掌握时下次间隔按 1/3/7/14/30 天计算，已掌握时清空 `next_review_at`。
+- 直接 `PATCH /gaps/{id}` 为 `reviewing` 返回 400；active 复习中的目标漏洞手动改状态返回 409。手动标记 `resolved` 会记录 `resolution_source=manual`。
+- 复习报告保存失败返回 503「复习结果暂未保存，请重试」。同一 session 再次提交会重试落库，不会重复计数。
+
+### 10.4 复习统计（P1）
+
+`GET /api/v1/reviews/stats` 返回当前用户按知识点分组的完成次数、四维平均分差、
+手动/系统判定已掌握数以及最近一次复习摘要。平均分差只统计有基线分数的维度。
+
 ## 前端联调注意事项
 
 1. 同一轮对话必须复用同一个 `session_id` 和 `kp_id`。

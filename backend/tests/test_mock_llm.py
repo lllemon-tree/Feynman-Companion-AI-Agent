@@ -59,7 +59,7 @@ class ReviewPlanBuilderTest(unittest.TestCase):
         # 只有低分维度进重读指引
         self.assertEqual(len(plan.reread_guide), 1)
         self.assertIn("理解深度", plan.reread_guide[0].reason)
-        self.assertGreaterEqual(len(plan.priority_order), 1)
+        self.assertEqual(plan.priority_order, [])
 
     def test_no_low_score_returns_empty_plan(self):
         dims = [

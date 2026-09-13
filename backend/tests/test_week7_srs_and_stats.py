@@ -61,7 +61,7 @@ class Week7SrsAndStatsApiTest(unittest.TestCase):
             )
             self.assertEqual(next_review_at - reviewed_at, timedelta(days=days))
 
-    def test_start_review_increments_count_and_returns_next_review_time(self) -> None:
+    def test_direct_patch_cannot_start_review_or_advance_srs(self) -> None:
         self._add_gap(id="gap-srs", user_id="user-a", status="open")
 
         first = self.client.patch(
@@ -75,22 +75,13 @@ class Week7SrsAndStatsApiTest(unittest.TestCase):
             json={"status": "reviewing"},
         )
 
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        first_data = first.json()["data"]
-        second_data = second.json()["data"]
-        self.assertEqual(first_data["review_count"], 1)
-        self.assertEqual(second_data["review_count"], 2)
-        self.assertEqual(
-            datetime.fromisoformat(first_data["next_review_at"])
-            - datetime.fromisoformat(first_data["last_reviewed_at"]),
-            timedelta(days=1),
-        )
-        self.assertEqual(
-            datetime.fromisoformat(second_data["next_review_at"])
-            - datetime.fromisoformat(second_data["last_reviewed_at"]),
-            timedelta(days=3),
-        )
+        self.assertEqual(first.status_code, 400)
+        self.assertEqual(second.status_code, 400)
+        with Session(self.engine) as db:
+            gap = db.get(KnowledgeGap, "gap-srs")
+            self.assertEqual(gap.status, "open")
+            self.assertEqual(gap.review_count, 0)
+            self.assertIsNone(gap.last_reviewed_at)
 
     def test_review_due_is_user_scoped_filtered_and_severity_sorted(self) -> None:
         now = datetime.now()
@@ -137,12 +128,29 @@ class Week7SrsAndStatsApiTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         data = response.json()["data"]
-        self.assertEqual(data["total"], 2)
+        self.assertEqual(data["total"], 3)
         self.assertEqual(
             [item["gap_id"] for item in data["items"]],
-            ["gap-due-high", "gap-due-low"],
+            ["gap-due-high", "gap-open", "gap-due-low"],
         )
-        self.assertTrue(all(item["status"] == "reviewing" for item in data["items"]))
+        self.assertTrue(all(item["status"] in {"open", "reviewing"} for item in data["items"]))
+
+    def test_review_due_uses_local_calendar_day_for_utc_and_legacy_times(self) -> None:
+        local_tz = datetime.now().astimezone().tzinfo
+        now = datetime(2026, 9, 13, 0, 30, tzinfo=local_tz)
+        today_utc = datetime(2026, 9, 13, 0, 15, tzinfo=local_tz).astimezone(timezone.utc)
+        tomorrow_utc = datetime(2026, 9, 14, 0, 15, tzinfo=local_tz).astimezone(timezone.utc)
+        self._add_gap(id="gap-utc-today", user_id="user-a", status="open", next_review_at=today_utc.isoformat())
+        self._add_gap(id="gap-local-today", user_id="user-a", status="open", next_review_at="2026-09-13T22:00:00")
+        self._add_gap(id="gap-utc-tomorrow", user_id="user-a", status="open", next_review_at=tomorrow_utc.isoformat())
+
+        with Session(self.engine) as db:
+            result = KnowledgeGapService.get_review_due_gaps(db, "user-a", now=now)
+
+        self.assertEqual(
+            {item["gap_id"] for item in result["items"]},
+            {"gap-utc-today", "gap-local-today"},
+        )
 
     def test_user_stats_aggregates_reports_and_isolates_users(self) -> None:
         self._add_report(

@@ -25,6 +25,7 @@ def create_db_and_tables():
     from backend.app.models.knowledge import Chapter, Chunk, KP, LearnSession, Material
     from backend.app.models.user_profile import UserProfile
     from backend.app.models.knowledge_gap import KnowledgeGap  
+    from backend.app.models.review_attempt import ReviewAttempt
     
     SQLModel.metadata.create_all(engine)
     with engine.begin() as connection:
@@ -58,6 +59,24 @@ def create_db_and_tables():
                 connection.execute(
                     text("ALTER TABLE diagnostic_report ADD COLUMN review_plan TEXT")
                 )
+            if "review_attempt_id" not in report_columns:
+                connection.execute(
+                    text("ALTER TABLE diagnostic_report ADD COLUMN review_attempt_id VARCHAR")
+                )
+            connection.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_diagnostic_report_review_attempt_id "
+                "ON diagnostic_report(review_attempt_id)"
+            ))
+        if inspect(connection).has_table("knowledge_gap"):
+            gap_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("knowledge_gap")
+            }
+            for column_name in ("resolved_at", "resolution_source"):
+                if column_name not in gap_columns:
+                    connection.execute(text(
+                        f"ALTER TABLE knowledge_gap ADD COLUMN {column_name} VARCHAR"
+                    ))
     with Session(engine) as session:
         if session.get(User, GUEST_USER_ID) is None:
             session.add(

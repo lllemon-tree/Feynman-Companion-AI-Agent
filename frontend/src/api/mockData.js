@@ -760,7 +760,8 @@ export const MOCK_REVIEW_RESULT_COMPLETED = {
         gap_id: 'gap-logic',
         gap_status: 'reviewing',
         review_count: 1,
-        next_review_at: '2026-08-13T16:30:00'
+        // 首次复习完成后 1 天再复习，与后端 SRS 规则保持一致。
+        next_review_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
       }
     ]
   }

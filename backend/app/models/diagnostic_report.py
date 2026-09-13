@@ -32,6 +32,7 @@ class DiagnosticReport(SQLModel, table=True):
     overall_comment: Optional[str] = None
     gaps_identified: int = Field(default=0, ge=0, le=4)
     review_plan: Optional[str] = None  # ReviewPlan 的 JSON 字符串，未生成时为 None
+    review_attempt_id: Optional[str] = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=utc_now)
 
 

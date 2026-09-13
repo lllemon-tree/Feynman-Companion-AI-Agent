@@ -107,13 +107,14 @@ class Week6ProfileAndGapApiTest(unittest.TestCase):
         valid = self.client.patch(
             "/api/v1/gaps/gap-a",
             headers=self.user_a_headers,
-            json={"status": "reviewing"},
+            json={"status": "resolved"},
         )
 
         self.assertEqual(invalid.status_code, 400)
         self.assertEqual(other_user.status_code, 404)
         self.assertEqual(valid.status_code, 200)
-        self.assertEqual(valid.json()["data"]["status"], "reviewing")
+        self.assertEqual(valid.json()["data"]["status"], "resolved")
+        self.assertEqual(valid.json()["data"]["resolution_source"], "manual")
 
     def test_gap_list_query_parameters_are_validated(self) -> None:
         bad_status = self.client.get(

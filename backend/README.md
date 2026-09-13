@@ -60,6 +60,10 @@ LLM_PROVIDER=mock
 - `GET /api/v1/feynman/sessions/{session_id}`
 - `GET /api/v1/reports?page=1&page_size=20`
 - `GET /api/v1/reports/{report_id}`
+- `POST /api/v1/reviews/start` (login required)
+- `GET /api/v1/reviews/{review_id}` (login required)
+- `GET /api/v1/reviews/stats` (login required)
+- `GET /api/v1/gaps/review-due` (login required)
 
 Request:
 
@@ -95,6 +99,10 @@ For logged-in users, a `generate_report` response is also persisted to the
 `diagnostic_report` table. Dimensions scoring 6 or below are synchronized to
 the `knowledge_gap` table when that table is available. Repeating a completed
 session is idempotent and does not create duplicate reports or open gaps.
+Review sessions are linked to a durable `review_attempt`. Starting or resuming a
+review does not increment its gaps' `review_count`; a successfully saved final
+report increments each target gap once and atomically updates the report,
+attempt, and gaps. Initial low-score gaps are scheduled for the next day.
 Guest conversations still return the report to the frontend but are not
 persisted.
 

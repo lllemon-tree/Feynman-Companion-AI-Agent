@@ -14,7 +14,7 @@ from backend.app.models.feynman import (
     SessionDebugResponse,
     SessionListResponse,
 )
-from backend.app.services.feynman_service import get_feynman_service
+from backend.app.services.feynman_service import ReviewPersistenceError, get_feynman_service
 from backend.app.services.session_store import SessionAccessDeniedError
 
 
@@ -51,6 +51,8 @@ async def chat(
         return ApiResponse(code=400, msg=str(exc), data=None)
     except SessionAccessDeniedError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ReviewPersistenceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         import traceback
         print(f"❌ chat 500 error: {type(exc).__name__}: {exc}")

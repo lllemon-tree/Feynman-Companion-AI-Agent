@@ -82,6 +82,8 @@ class KnowledgeGap(KnowledgeGapBase, table=True):
     next_review_at: Optional[str] = Field(
         default=None, description="下次推荐复习时间"
     )
+    resolved_at: Optional[str] = None
+    resolution_source: Optional[str] = None
 
     # 记录漏洞创建与更新时间
     created_at: str = Field(

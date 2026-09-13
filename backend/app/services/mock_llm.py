@@ -6,12 +6,12 @@ from backend.app.models.feynman import (
     FinalReport,
     FeynmanChatData,
     NextAction,
-    PriorityItem,
     ReviewPlan,
     ReviewPlanItem,
 )
 from backend.app.models.rag import RetrievedChunk
 from backend.app.services.kp_provider import KnowledgePoint
+from backend.app.services.review_rules import is_mastered
 
 
 class MockLLMClient:
@@ -46,6 +46,16 @@ class MockLLMClient:
             return _build_report(all_text, coverage, knowledge_point.name)
 
         suffix = _pain_point_suffix(profile)  # 按痛点追加引导语
+        if review_context and follow_up_count < len(review_context.review_focus):
+            dimension_name = review_context.review_focus[follow_up_count]
+            return FeynmanChatData(
+                next_action=NextAction.FOLLOW_UP,
+                reply_text=(
+                    f"上次你在「{dimension_name}」上还有疑问。"
+                    f"请再讲清{knowledge_point.name}的关键条件和推理依据，为什么这样做成立？"
+                    + suffix
+                ),
+            )
         if not coverage["non_negative"]:
             return FeynmanChatData(
                 next_action=NextAction.FOLLOW_UP,
@@ -80,6 +90,7 @@ def _evaluate_generic(
     max_follow_ups: int,
     knowledge_point: KnowledgePoint,
     profile=None,
+    review_context=None,
 ) -> FeynmanChatData:
     if follow_up_count >= max_follow_ups:
         return _build_generic_report(text, knowledge_point.name, profile=profile)
@@ -89,6 +100,16 @@ def _evaluate_generic(
         "core_mechanism",
         "principle_proof",
     ]
+    if review_context and follow_up_count < len(review_context.review_focus):
+        dimension_name = review_context.review_focus[follow_up_count]
+        return FeynmanChatData(
+            next_action=NextAction.FOLLOW_UP,
+            reply_text=(
+                f"上次你在「{dimension_name}」上还有疑问。"
+                f"这次请你围绕{knowledge_point.name}，说明相关条件和推理为什么成立？"
+                + _pain_point_suffix(profile)
+            ),
+        )
     dimension = knowledge_point.rubric.get(dimension_keys[min(follow_up_count, 2)], {})
     dimension_name = dimension.get("name", "核心原理")
     return FeynmanChatData(
@@ -154,12 +175,12 @@ def _normalize(text: str) -> str:
 
 
 def _build_mock_review_plan(dimensions, kp_name: str) -> ReviewPlan:
-    """从四维评分生成复习计划：得分 <= 6 的维度进入重读指引与优先级排序。
+    """从未掌握的维度生成唯一的教材重读指引。
 
     Mock 降级时的简化版 review_plan，保证前端在 DeepSeek 不可用时
     也能拿到复习建议结构，不阻塞联调。
     """
-    low_score = [dim for dim in dimensions if dim.score <= 6]
+    low_score = [dim for dim in dimensions if not is_mastered(dim.score)]
     if not low_score:
         return ReviewPlan()  # 没有低分维度 → 空计划（安全默认）
 
@@ -173,19 +194,9 @@ def _build_mock_review_plan(dimensions, kp_name: str) -> ReviewPlan:
         )
         for idx, dim in enumerate(low_score)
     ]
-    priority_order = [
-        PriorityItem(
-            rank=idx + 1,
-            dimension=dim.name,
-            kp_name=kp_name,
-            suggestion=dim.suggestion,
-        )
-        for idx, dim in enumerate(low_score)
-    ]
     return ReviewPlan(
         reread_guide=reread_guide,
         related_kps=[],  # Mock 无同类知识点数据来源，留空
-        priority_order=priority_order,
     )
 
 
