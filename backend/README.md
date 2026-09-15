@@ -28,7 +28,8 @@ Then fill your own DeepSeek API key:
 ```env
 DEEPSEEK_API_KEY=your_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_CHAT_MODELS=deepseek-flash,deepseek-v4-pro
 LLM_PROVIDER=deepseek
 REQUEST_TIMEOUT_SECONDS=30
 AUTH_SECRET_KEY=replace_with_a_long_random_secret
@@ -54,6 +55,7 @@ LLM_PROVIDER=mock
 - `GET/POST/PATCH/DELETE /api/v1/kp/...`
 - `GET /api/v1/feynman/greeting?kp_id=kp-demo`
 - `POST /api/v1/feynman/chat`
+- `POST /api/v1/feynman/chat/stream`（知识点讲解流式正文，最终 `done` 事件仍包含完整报告数据）
 - `POST /api/v1/feynman/reset`
 - `GET /api/v1/feynman/session/{session_id}`
 - `GET /api/v1/feynman/sessions`
@@ -64,6 +66,12 @@ LLM_PROVIDER=mock
 - `GET /api/v1/reviews/{review_id}` (login required)
 - `GET /api/v1/reviews/stats` (login required)
 - `GET /api/v1/gaps/review-due` (login required)
+- `GET /api/v1/conversations/models` (free-chat model catalog)
+- `POST /api/v1/conversations` (login required)
+- `GET /api/v1/conversations` (login required)
+- `GET /api/v1/conversations/{conversation_id}` (login required)
+- `POST /api/v1/conversations/{conversation_id}/messages/stream` (NDJSON incremental reply; login required)
+- `POST /api/v1/conversations/{conversation_id}/assessment` (free beginner-mode feedback; login required)
 
 Request:
 

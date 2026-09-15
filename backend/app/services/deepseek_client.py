@@ -1,5 +1,6 @@
 import json
-from typing import Any, Optional, Sequence
+import re
+from typing import Any, AsyncIterator, Callable, Optional, Sequence
 
 import httpx
 
@@ -52,6 +53,37 @@ class DeepSeekClient:
         )
         return FeynmanChatData.model_validate(parsed)
 
+    async def evaluate_stream(
+        self,
+        messages: Sequence[ChatMessage],
+        user_input: str,
+        follow_up_count: int,
+        max_follow_ups: int,
+        knowledge_point: KnowledgePoint,
+        grounding_chunks: Sequence[RetrievedChunk] = (),
+        profile: Optional[UserProfileResponse] = None,
+        review_context: Optional[ReviewContext] = None,
+        on_reply_delta: Callable[[str], None] | None = None,
+    ) -> FeynmanChatData:
+        parsed = await self._request_json_streaming(
+            system_prompt=build_system_prompt(
+                kp_name=knowledge_point.name,
+                rubric=knowledge_point.rubric,
+                grounding_chunks=grounding_chunks,
+                profile=profile,
+                review_context=review_context,
+            ),
+            user_prompt=build_user_prompt(
+                messages=messages,
+                user_input=user_input,
+                follow_up_count=follow_up_count,
+                max_follow_ups=max_follow_ups,
+                grounding_chunks=grounding_chunks,
+            ),
+            on_reply_delta=on_reply_delta,
+        )
+        return FeynmanChatData.model_validate(parsed)
+
     async def extract_knowledge(self, chunk_text: str, page_no: int) -> KPExtractionResponse:
         parsed = await self._request_json(
             system_prompt=KP_EXTRACTION_SYSTEM_PROMPT,
@@ -65,7 +97,99 @@ class DeepSeekClient:
             user_prompt=build_rubric_user_prompt(source_text, kp_name),
         )
 
-    async def _request_json(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
+    async def respond_in_conversation(self, mode: str, history: str, user_input: str, model: str | None = None) -> str:
+        if mode == "expert":
+            system_prompt = (
+                "你是费曼伴学的专家模式。回答用户的学业与技术问题，先给出直接、准确的解释，"
+                "再按需要举例和指出前提。不要假装知道不确定的事实，也不要伪造教材出处。"
+                "只返回 JSON：{\"reply_text\": \"回答内容\"}。"
+            )
+        else:
+            system_prompt = (
+                "你是费曼伴学的小白模式。用户正在用自己的语言教你一个概念。"
+                "像认真但不懂的学习伙伴一样，先复述你听懂的部分，然后只追问一个最关键的问题。"
+                "不要替用户讲完整答案，不要现在给分，也不要虚构教材依据。"
+                "只返回 JSON：{\"reply_text\": \"回应内容\"}。"
+            )
+        result = await self._request_json(
+            system_prompt=system_prompt,
+            user_prompt=f"【已有对话】\n{history}\n【用户本轮输入】\n{user_input}",
+            model=model,
+        )
+        return str(result.get("reply_text", "")).strip()
+
+    async def stream_in_conversation(
+        self, mode: str, history: str, user_input: str, model: str
+    ) -> AsyncIterator[str]:
+        if not self._settings.deepseek_configured:
+            raise RuntimeError("DeepSeek API key is not configured.")
+        if mode == "expert":
+            system_prompt = (
+                "你是费曼伴学的专家模式。准确回答用户的学业与技术问题，先给直接解释，"
+                "再按需讲清前提、过程与例子。不确定时坦诚说明，不伪造教材出处。直接输出正文。"
+            )
+        else:
+            system_prompt = (
+                "你是费曼伴学的小白模式。用户正在用自己的语言教你一个概念。"
+                "先复述你听懂的部分，再只追问一个关键问题。不要代替用户讲完整答案，"
+                "不要现在打分或虚构教材依据。直接输出正文。"
+            )
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"【已有对话】\n{history}\n【用户本轮输入】\n{user_input}"},
+            ],
+            "stream": True,
+            "thinking": {"type": "disabled"},
+            "temperature": 0.2,
+            "max_tokens": 4096,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._settings.deepseek_api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=self._settings.request_timeout_seconds) as client:
+            async with client.stream(
+                "POST", f"{self._settings.deepseek_base_url}/chat/completions",
+                headers=headers, json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    if not raw:
+                        continue
+                    event = json.loads(raw)
+                    if "error" in event:
+                        raise RuntimeError(str(event["error"]))
+                    choices = event.get("choices") or []
+                    if choices:
+                        content = choices[0].get("delta", {}).get("content")
+                        if content:
+                            yield content
+
+    async def assess_free_explanation(
+        self, history: str, user_explanations: str, model: str | None = None
+    ) -> dict[str, Any]:
+        return await self._request_json(
+            system_prompt=(
+                "你是费曼伴学的讲解评估器。这里没有指定教材，不要声称和某本教材一致，也不要给数值分数。"
+                "只评估用户自己讲过的话，不把助手之前给出的内容当成用户的理解。"
+                "输出 JSON，字段必须有 topic、strengths（字符串数组）、gaps（字符串数组）、"
+                "evidence（数组，每项含 quote 和 observation）、next_step。"
+                "evidence.quote 必须逐字复制用户原话中的一小段；找不到证据就不要编造。"
+            ),
+            user_prompt=f"【对话上下文】\n{history}\n【仅供评估的用户讲解原话】\n{user_explanations}",
+            model=model,
+        )
+
+    async def _request_json(
+        self, system_prompt: str, user_prompt: str, model: str | None = None
+    ) -> dict[str, Any]:
         if not self._settings.deepseek_configured:
             raise RuntimeError("DeepSeek API key is not configured.")
 
@@ -93,7 +217,7 @@ class DeepSeekClient:
         # =================================================
 
         payload = {
-            "model": self._settings.deepseek_model,
+            "model": model or self._settings.deepseek_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -118,6 +242,61 @@ class DeepSeekClient:
         content = data["choices"][0]["message"]["content"]
         return _parse_json_object(content)
 
+    async def _request_json_streaming(
+        self, system_prompt: str, user_prompt: str,
+        on_reply_delta: Callable[[str], None] | None,
+    ) -> dict[str, Any]:
+        if not self._settings.deepseek_configured:
+            raise RuntimeError("DeepSeek API key is not configured.")
+        payload = {
+            "model": self._settings.deepseek_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+            "stream": True,
+            # 深度思考默认开启时，先输出 reasoning_content；用户端看不到，
+            # 会误以为整个知识点回复没有流式输出。
+            "thinking": {"type": "disabled"},
+        }
+        headers = {
+            "Authorization": f"Bearer {self._settings.deepseek_api_key}",
+            "Content-Type": "application/json",
+        }
+        content_parts: list[str] = []
+        visible = ""
+        async with httpx.AsyncClient(timeout=self._settings.request_timeout_seconds) as client:
+            async with client.stream(
+                "POST", f"{self._settings.deepseek_base_url}/chat/completions",
+                headers=headers, json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[5:].strip()
+                    if raw == "[DONE]":
+                        break
+                    if not raw:
+                        continue
+                    event = json.loads(raw)
+                    if "error" in event:
+                        raise RuntimeError(str(event["error"]))
+                    choices = event.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = choices[0].get("delta", {}).get("content")
+                    if not delta:
+                        continue
+                    content_parts.append(delta)
+                    partial = _reply_text_prefix("".join(content_parts))
+                    if on_reply_delta and partial.startswith(visible) and len(partial) > len(visible):
+                        on_reply_delta(partial[len(visible):])
+                    visible = partial
+        return _parse_json_object("".join(content_parts))
+
 
 def _parse_json_object(content: str) -> dict[str, Any]:
     try:
@@ -128,3 +307,33 @@ def _parse_json_object(content: str) -> dict[str, Any]:
         if start == -1 or end == -1 or end <= start:
             raise
         return json.loads(content[start : end + 1])
+
+
+def _reply_text_prefix(content: str) -> str:
+    """Decode only the completed prefix of the top-level reply_text JSON string."""
+    match = re.search(r'(?<!\\)"reply_text"\s*:\s*"', content)
+    if match is None:
+        return ""
+    start = match.end()
+    index = start
+    while index < len(content):
+        char = content[index]
+        if char == '"':
+            break
+        if char == "\\":
+            if index + 1 >= len(content):
+                break
+            if content[index + 1] == "u":
+                if index + 6 > len(content):
+                    break
+                if not re.fullmatch(r"[0-9a-fA-F]{4}", content[index + 2:index + 6]):
+                    break
+                index += 6
+                continue
+            index += 2
+            continue
+        index += 1
+    try:
+        return json.loads('"' + content[start:index] + '"')
+    except json.JSONDecodeError:
+        return ""

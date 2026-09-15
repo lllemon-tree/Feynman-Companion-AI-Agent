@@ -152,7 +152,7 @@ async function startFeynman() {
   chatStore.setMaterial(selectedMaterialId.value, material?.title || '')
   chatStore.setChapter(selectedChapterId.value, chapter?.title || '')
   chatStore.setKnowledgePoint(kp.kp_id, kp.name)
-  router.push('/home')
+  router.push('/study')
 }
 
 function showToastMsg(msg) {

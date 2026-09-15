@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ==================== 复习计划相关模型 ====================
 
@@ -74,11 +74,39 @@ class CardPreview(BaseModel):
     summary: str = Field(..., min_length=1, max_length=30)
 
 
+class DimensionEvidence(BaseModel):
+    quote: str = Field(..., min_length=2)
+    observation: str = Field(..., min_length=1)
+
+
 class DimensionReport(BaseModel):
     name: str
     score: int = Field(..., ge=0, le=10)
     analysis: str = Field(..., min_length=1)
     suggestion: str = Field(..., min_length=1)
+    covered_points: List[str] = Field(default_factory=list)
+    gaps: List[str] = Field(default_factory=list)
+    evidence: List[DimensionEvidence] = Field(default_factory=list)
+
+    @field_validator("covered_points", "gaps", mode="before")
+    @classmethod
+    def normalize_points(cls, value):
+        if not isinstance(value, list):
+            return []
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()][:3]
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def normalize_evidence(cls, value):
+        if not isinstance(value, list):
+            return []
+        return [
+            item for item in value
+            if isinstance(item, DimensionEvidence)
+            or (isinstance(item, dict)
+                and len(str(item.get("quote", "")).strip()) >= 2
+                and str(item.get("observation", "")).strip())
+        ][:3]
 
 
 class FinalReport(BaseModel):
@@ -92,6 +120,8 @@ class FeynmanChatData(BaseModel):
     card_preview: Optional[CardPreview] = None
     final_report: Optional[FinalReport] = None
     review_plan: Optional[ReviewPlan] = None
+    provider: Optional[str] = None
+    fallback_used: bool = False
 
     @model_validator(mode="after")
     def use_dimension_scores_as_total(self):

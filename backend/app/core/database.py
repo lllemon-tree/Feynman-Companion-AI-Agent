@@ -26,9 +26,16 @@ def create_db_and_tables():
     from backend.app.models.user_profile import UserProfile
     from backend.app.models.knowledge_gap import KnowledgeGap  
     from backend.app.models.review_attempt import ReviewAttempt
+    from backend.app.models.conversation import Conversation, ConversationMessage
     
     SQLModel.metadata.create_all(engine)
     with engine.begin() as connection:
+        if inspect(connection).has_table("conversation_message"):
+            message_columns = {
+                column["name"] for column in inspect(connection).get_columns("conversation_message")
+            }
+            if "model" not in message_columns:
+                connection.execute(text("ALTER TABLE conversation_message ADD COLUMN model VARCHAR"))
         columns = {column["name"] for column in inspect(connection).get_columns("material")}
         if "name" not in columns:
             connection.execute(text("ALTER TABLE material ADD COLUMN name VARCHAR"))

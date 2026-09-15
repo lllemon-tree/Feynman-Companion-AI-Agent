@@ -1,17 +1,25 @@
 <script setup>
-import { ref, onMounted, computed, onActivated } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, computed, onActivated, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
 import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview } from '@/api/feynman'
 import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
-import ReportDrawer from '@/components/ReportDrawer.vue'
+import ReportDrawer from '@/components/DetailedReportDrawer.vue'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 
 const activeTab = ref('profile')
+const pageTitle = computed(() => ({
+  profile: '个人主页',
+  gaps: '复习计划',
+  sessions: '教材讲解记录',
+  reports: '学习报告',
+  materials: '我的教材'
+}[activeTab.value] || '个人主页'))
 const loading = ref(false)
 
 // 学情档案
@@ -89,7 +97,7 @@ async function startReviewKp(group) {
       chatStore.startReviewContext(reviewData)
       // 标记返回后需要刷新
       needRefreshOnReturn.value = true
-      router.push('/home')
+      router.push('/study')
     } catch (e) {
       const msg = e.status === 409
         ? '当前知识点暂无未解决漏洞，可能已全部掌握'
@@ -145,7 +153,7 @@ async function startDueReview(gap) {
     chatStore.setKnowledgePoint(gap.kp_id, gap.kp_name)
     chatStore.startReviewContext(reviewData)
     needRefreshOnReturn.value = true
-    router.push('/home')
+    router.push('/study')
   } catch (e) {
     const msg = e.status === 409
       ? '当前知识点暂无未解决漏洞，可能已全部掌握'
@@ -209,14 +217,6 @@ const loadingSessions = ref(false)
 const showSessionDetail = ref(false)
 const selectedSession = ref(null)
 const sessionDetailLoading = ref(false)
-
-const tabs = [
-  { key: 'profile', label: '学情档案', icon: 'user' },
-  { key: 'gaps', label: '知识漏洞', icon: 'alert' },
-  { key: 'sessions', label: '历史会话', icon: 'chat' },
-  { key: 'reports', label: '历史报告', icon: 'chart' },
-  { key: 'materials', label: '我的教材', icon: 'book' }
-]
 
 const gapStatusTabs = [
   { key: 'open', label: '待复习', color: '#EF4444' },
@@ -330,7 +330,7 @@ async function viewSessionDetail(session) {
 function continueSession(session) {
   // 跳转到聊天页面，携带会话ID和KP信息
   router.push({
-    path: '/home',
+    path: '/study',
     query: {
       sessionId: session.session_id,
       kpName: session.kp_name,
@@ -416,6 +416,12 @@ function handleTabChange(key) {
   }
 }
 
+watch(() => route.query.tab, tab => {
+  if (['profile', 'gaps', 'sessions', 'reports', 'materials'].includes(tab) && tab !== activeTab.value) {
+    handleTabChange(tab)
+  }
+})
+
 function handleGapStatusChange(status) {
   activeGapStatus.value = status
   loadGaps()
@@ -442,10 +448,6 @@ function goToUpload() {
   router.push('/upload')
 }
 
-function goBack() {
-  router.push('/select')
-}
-
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -458,6 +460,8 @@ onMounted(() => {
     activeTab.value = 'gaps'
     // 清除 query，避免刷新后重复触发
     router.replace({ path: '/profile' })
+  } else if (['profile', 'gaps', 'sessions', 'reports', 'materials'].includes(route.query.tab)) {
+    activeTab.value = route.query.tab
   }
   // 加载学情统计数据
   loadUserStats()
@@ -495,21 +499,14 @@ onActivated(() => {
 <template>
   <div class="profile-page">
     <header class="profile-header">
-      <button class="back-btn" @click="goBack">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M15 18l-6-6 6-6" />
-        </svg>
-        返回
-      </button>
-      <h1 class="page-title">个人中心</h1>
-      <div class="header-placeholder"></div>
+      <h1 class="page-title">{{ pageTitle }}</h1>
     </header>
 
     <main class="profile-main">
       <div class="profile-layout">
-        <aside class="profile-sidebar">
-          <!-- 用户信息卡片 -->
-          <div class="user-card">
+        <section class="profile-content">
+      <!-- 个人主页保留身份和学情；功能入口统一交给应用左侧导航。 -->
+      <div v-if="activeTab === 'profile'" class="user-card">
         <div class="user-avatar-large">
           <span v-if="username" class="avatar-letter">{{ username.charAt(0).toUpperCase() }}</span>
           <svg v-else width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -524,44 +521,10 @@ onActivated(() => {
         <button v-if="!isLoggedIn" class="login-prompt-btn" @click="router.push('/login')">
           去登录
         </button>
-      </div>
-
-      <!-- Tab 切换 -->
-      <div class="tabs-container">
-        <button
-          v-for="tab in tabs"
-          :key="tab.key"
-          class="tab-btn"
-          :class="{ 'tab-btn--active': activeTab === tab.key }"
-          @click="handleTabChange(tab.key)"
-        >
-          <svg v-if="tab.icon === 'user'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
-          <svg v-else-if="tab.icon === 'alert'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-            <line x1="12" y1="9" x2="12" y2="13" />
-            <line x1="12" y1="17" x2="12.01" y2="17" />
-          </svg>
-          <svg v-else-if="tab.icon === 'chart'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="20" x2="18" y2="10" />
-            <line x1="12" y1="20" x2="12" y2="4" />
-            <line x1="6" y1="20" x2="6" y2="14" />
-          </svg>
-          <svg v-else-if="tab.icon === 'chat'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
-          <svg v-else-if="tab.icon === 'book'" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-          </svg>
-          <span>{{ tab.label }}</span>
+        <button v-else class="record-link" type="button" @click="router.push('/profile?tab=sessions')">
+          查看教材讲解记录
         </button>
       </div>
-        </aside>
-
-        <section class="profile-content">
       <!-- 学情档案 Tab -->
       <div v-if="activeTab === 'profile'" class="tab-content">
         <!-- 学情统计概览 -->
@@ -1187,6 +1150,7 @@ onActivated(() => {
     <ReportDrawer
       :open="showReportDetail"
       :report="selectedReport"
+      :loading="reportDetailLoading"
       @close="showReportDetail = false"
     />
 
@@ -1398,22 +1362,7 @@ export default {
 }
 
 .profile-layout {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-}
-
-.profile-sidebar {
-  width: 280px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  position: sticky;
-  top: 76px;
-  align-self: flex-start;
-  min-height: calc(100vh - 76px);
-  overflow-y: auto;
+  width: 100%;
 }
 
 .profile-content {
@@ -1429,19 +1378,20 @@ export default {
 /* 用户卡片 */
 .user-card {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
-  gap: 12px;
-  padding: 20px 16px;
+  gap: 16px;
+  padding: 18px 22px;
   background: #FFFFFF;
   border-radius: 16px;
   border: 1px solid #E2E8F0;
-  text-align: center;
+  text-align: left;
 }
 
 .user-avatar-large {
   width: 56px;
   height: 56px;
+  flex: 0 0 56px;
   border-radius: 50%;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   display: flex;
@@ -1459,8 +1409,20 @@ export default {
 .user-info {
   flex: 1;
   min-width: 0;
-  text-align: center;
+  text-align: left;
 }
+
+.record-link {
+  padding: 8px 12px;
+  border: 1px solid #cbdaf5;
+  border-radius: 8px;
+  color: #245bd4;
+  background: #f6f9ff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.record-link:hover { background: #eaf1ff; }
 
 .user-name {
   margin: 0 0 4px;
@@ -1896,43 +1858,6 @@ export default {
 
 .gap-card-actions .action-btn .spinner {
   animation: spin 1s linear infinite;
-}
-
-/* Tab 容器 */
-.tabs-container {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: #FFFFFF;
-  padding: 8px;
-  border-radius: 12px;
-  border: 1px solid #E2E8F0;
-}
-
-.tab-btn {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #64748B;
-  text-align: left;
-  border-left: 3px solid transparent;
-  transition: all 150ms;
-}
-
-.tab-btn--active {
-  background: rgba(37, 99, 235, 0.1);
-  color: #2563EB;
-  border-left: 3px solid #2563EB;
-}
-
-.tab-btn--active svg {
-  color: #2563EB;
 }
 
 .tab-content {
@@ -2809,15 +2734,9 @@ export default {
   background: #E2E8F0;
 }
 
-/* 响应式：小屏幕回退为上下布局 */
 @media (max-width: 767px) {
-  .profile-layout {
-    flex-direction: column;
-  }
-
-  .profile-sidebar {
-    width: 100%;
-  }
+  .user-card { flex-wrap: wrap; padding: 16px; }
+  .record-link { width: 100%; }
 }
 
 /* 轻量 Toast */

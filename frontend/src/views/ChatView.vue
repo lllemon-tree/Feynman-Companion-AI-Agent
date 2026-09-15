@@ -1,19 +1,25 @@
 <script setup>
-import { onMounted, ref, nextTick, watch, onBeforeUnmount } from 'vue'
-import { useRouter } from 'vue-router'
+import { onMounted, ref, nextTick, watch, onBeforeUnmount, computed, defineAsyncComponent } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chatStore'
 import MessageBubble from '@/components/MessageBubble.vue'
 import LoadingBubble from '@/components/LoadingBubble.vue'
 import ReportCard from '@/components/ReportCard.vue'
-import ReportDrawer from '@/components/ReportDrawer.vue'
-import ReviewResultPanel from '@/components/ReviewResultPanel.vue'
 import ChatInput from '@/components/ChatInput.vue'
-import UserBar from '@/components/UserBar.vue'
 
 const router = useRouter()
+const ReportDrawer = defineAsyncComponent(() => import('@/components/DetailedReportDrawer.vue'))
+const ReviewResultPanel = defineAsyncComponent(() => import('@/components/ReviewResultPanel.vue'))
+const route = useRoute()
 const store = useChatStore()
 const drawerOpen = ref(false)
 const messageListEl = ref(null)
+const pinnedToBottom = ref(true)
+const contextLabel = computed(() => [store.subject, store.materialTitle, store.chapterTitle].filter(Boolean).join(' / '))
+const hasVisiblePendingReply = computed(() => {
+  const lastMessage = store.messages.at(-1)
+  return lastMessage?.role === 'ai' && Boolean(lastMessage.content)
+})
 
 function goBack() {
   router.push('/select')
@@ -30,10 +36,19 @@ async function scrollToBottom(smooth = true) {
   })
 }
 
+function handleScroll() {
+  const el = messageListEl.value
+  if (el) pinnedToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+}
+
 /** 监听消息变化：每次新增都滚到底 */
 watch(
   () => store.messages.length,
   () => scrollToBottom()
+)
+watch(
+  () => store.messages.at(-1)?.content,
+  () => { if (store.isLocked && pinnedToBottom.value) scrollToBottom(false) }
 )
 /** loading 出现时也滚一下（气泡高度会变） */
 watch(
@@ -52,7 +67,19 @@ watch(
 )
 
 onMounted(async () => {
-  await store.bootstrap()
+  const resumeId = route.query.sessionId || (store.isReviewMode ? store.reviewSessionId : '')
+  if (resumeId) {
+    try {
+      await store.restoreSession(resumeId)
+    } catch (error) {
+      store.resetLocalState()
+      store.isLocked = true
+      store.setError(error.message || '历史会话恢复失败')
+      store.pushMessage('system', '未能恢复历史会话，请返回学习记录后重试。')
+    }
+  } else {
+    await store.bootstrap()
+  }
   scrollToBottom(false)
 })
 
@@ -61,8 +88,9 @@ onBeforeUnmount(() => {
   store.clearReviewContext()
 })
 
-async function handleSend(text) {
+async function handleSend(text, acknowledge) {
   const response = await store.sendUserMessage(text)
+  acknowledge?.(Boolean(response))
   if (
     response?.next_action === 'guide_topic' &&
     response?.reply_text?.includes('重新选择知识点')
@@ -99,15 +127,16 @@ function continueLearning() {
 
 <template>
   <div class="chat-view">
-    <!-- 顶部 Header -->
     <header class="chat-header">
-      <button class="back-btn" @click="goBack">
-        ← 选择知识点
-      </button>
-      <h1 class="chat-title">
-        {{ store.isReviewMode ? '费曼伴学智能体 — 复习模式' : '费曼伴学智能体 — 数据结构专练' }}
-      </h1>
-      <UserBar />
+      <button class="back-btn" type="button" aria-label="返回知识点选择" @click="goBack">←</button>
+      <div class="header-copy">
+        <div class="header-title-row">
+          <h1 class="chat-title">{{ store.kpName || '知识点讲解' }}</h1>
+          <span class="header-mode">{{ store.isReviewMode ? '专项复习' : '教材陪练' }}</span>
+        </div>
+        <p>{{ contextLabel || '选定知识点 · 费曼讲解' }}</p>
+      </div>
+      <button class="header-switch" type="button" @click="goBack">切换知识点</button>
     </header>
 
     <!-- 复习场景提示横幅（第八周 P0） -->
@@ -131,22 +160,36 @@ function continueLearning() {
     </div>
 
     <!-- 消息区 -->
-    <main ref="messageListEl" class="chat-main">
+    <main ref="messageListEl" class="chat-main" @scroll="handleScroll">
       <div class="chat-main__inner">
+        <div class="study-intro">
+          <span class="study-intro__eyebrow">知识点学习 · {{ store.isReviewMode ? '巩固' : '讲给小白听' }}</span>
+          <h2>{{ store.kpName || '开始你的讲解' }}</h2>
+          <p>先用自己的话讲一个你确定的点。我会结合教材追问，最后给出有依据的诊断和复习建议。</p>
+        </div>
+        <p v-if="store.errorMsg" class="chat-error" role="alert">{{ store.errorMsg }}</p>
         <MessageBubble
-          v-for="m in store.messages"
+          v-for="m in store.messages.filter(item => item.role !== 'ai' || item.content)"
           :key="m.id"
           :role="m.role"
           :content="m.content"
         />
 
-        <LoadingBubble v-if="store.isLocked && !store.isReportReady" />
+        <LoadingBubble
+          v-if="store.isLocked && !store.isReportReady && !store.errorMsg && !hasVisiblePendingReply"
+          :status="store.streamStatus || '正在处理…'"
+        />
+        <p v-if="store.isLocked && store.messages.at(-1)?.role === 'ai' && store.messages.at(-1)?.content" class="stream-status">
+          {{ store.streamStatus || '正在完成本轮讲解…' }}
+        </p>
 
         <!-- 报告卡片：熔断后插入到对话流尾部 -->
         <ReportCard
           v-if="store.isReportReady && store.reportData?.cardPreview"
           :card-preview="store.reportData.cardPreview"
           :final-report="store.reportData.finalReport"
+          :fallback-used="store.reportData.fallbackUsed"
+          :provider="store.reportData.provider"
           @click="openDrawer"
         />
 
@@ -162,17 +205,25 @@ function continueLearning() {
     </main>
 
     <!-- 底部输入区 -->
-    <ChatInput
-      :locked="store.isLocked"
-      :finished="store.isReportReady"
-      @send="handleSend"
-      @restart="handleRestart"
-    />
+    <div class="composer-wrap">
+      <ChatInput
+        :locked="store.isLocked"
+        :finished="store.isReportReady"
+        @send="handleSend"
+        @restart="handleRestart"
+      />
+      <p class="composer-note">Enter 发送 · Shift + Enter 换行 · 拼音选字不会发送</p>
+    </div>
 
     <!-- 报告抽屉 -->
     <ReportDrawer
+      v-if="drawerOpen"
       :open="drawerOpen"
       :report="store.reportData?.finalReport"
+      :review-plan="store.reportData?.reviewPlan"
+      :card-preview="store.reportData?.cardPreview"
+      :fallback-used="store.reportData?.fallbackUsed"
+      :provider="store.reportData?.provider"
       @close="drawerOpen = false"
       @restart="handleRestart"
     />
@@ -184,129 +235,118 @@ function continueLearning() {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
-  background: #F5F7FA;
+  min-height: 0;
+  flex: 1;
+  background: #fff;
   position: relative;
 }
-
-/* Header */
 .chat-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 15px;
+  gap: 14px;
+  padding: 12px 28px;
   width: 100%;
-  height: 52.5px;
-  background: #FFFFFF;
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  min-height: 76px;
+  background: #fff;
+  border-bottom: 1px solid #e9edf5;
   flex-shrink: 0;
 }
 .back-btn {
-  font-size: 13px;
-  color: #64748B;
-  transition: color 150ms;
-  background: transparent;
-  border: none;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #e5ebf4;
+  border-radius: 10px;
+  background: #fff;
+  color: #50627f;
+  font-size: 20px;
 }
-
-.back-btn:hover {
-  color: #1E293B;
-}
+.back-btn:hover { background: #f5f8fd; color: #265ce0; }
+.header-copy { min-width: 0; flex: 1; }
+.header-title-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .chat-title {
   margin: 0;
-  font-weight: 600;
-  font-size: 14.0625px;
-  line-height: 21px;
-  letter-spacing: 0.351562px;
-  color: #1A1D23;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+  font-size: 17px;
+  line-height: 1.35;
+  color: #17233b;
 }
+.header-copy p { margin: 4px 0 0; color: #8290a6; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.header-mode { flex: none; padding: 4px 8px; border-radius: 7px; background: #eef4ff; color: #2861d5; font-size: 11px; font-weight: 650; }
+.header-switch { flex: none; background: transparent; color: #60728f; font-size: 12px; border: 0; }
+.header-switch:hover { color: #265ce0; }
 
-/* 复习场景提示横幅 */
 .review-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 16px;
-  background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
-  border-bottom: 1px solid #C7D2FE;
+  padding: 9px 28px;
+  background: #f5f7ff;
+  border-bottom: 1px solid #e2e8ff;
   flex-shrink: 0;
 }
-
-.review-banner-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.review-banner-icon {
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.review-banner-text {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
+.review-banner-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.review-banner-icon { font-size: 17px; flex-shrink: 0; }
+.review-banner-text { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
 .review-banner-label {
-  padding: 2px 8px;
-  background: #4F46E5;
-  color: #FFFFFF;
-  border-radius: 6px;
+  padding: 3px 7px;
+  background: #5665d9;
+  color: #fff;
+  border-radius: 5px;
   font-size: 11px;
-  font-weight: 600;
-  flex-shrink: 0;
+  font-weight: 650;
 }
+.review-banner-desc { font-size: 12px; color: #555da1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.review-focus-tag { padding: 3px 7px; background: #e6e9ff; color: #555bc6; border-radius: 5px; font-size: 11px; font-weight: 600; }
+.review-banner-hint { font-size: 11px; color: #7882ad; flex-shrink: 0; white-space: nowrap; }
 
-.review-banner-desc {
-  font-size: 13px;
-  color: #3730A3;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.review-focus-tag {
-  padding: 2px 8px;
-  background: rgba(79, 70, 229, 0.12);
-  color: #4F46E5;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.review-banner-hint {
-  font-size: 12px;
-  color: #6366F1;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-/* 消息主区 */
 .chat-main {
   flex: 1;
-  padding: 22.5px 15px;
+  min-height: 0;
+  padding: 34px 30px 25px;
   overflow-y: auto;
 }
 .chat-main__inner {
   display: flex;
   flex-direction: column;
-  gap: 18.75px;
+  gap: 18px;
+  max-width: 840px;
+  margin: 0 auto;
 }
-
-/* 响应式：小屏下隐藏复习提示的次要文案 */
+.study-intro { padding: 2px 0 24px; border-bottom: 1px solid #edf1f7; margin-bottom: 10px; }
+.study-intro__eyebrow { color: #3268df; font-size: 11px; font-weight: 700; letter-spacing: .07em; }
+.study-intro h2 { margin: 10px 0 8px; font-size: clamp(22px, 2.5vw, 29px); line-height: 1.35; color: #17233b; letter-spacing: -.02em; }
+.study-intro p { margin: 0; font-size: 13px; color: #7b89a0; line-height: 1.65; }
+.chat-error { margin: 0; padding: 10px 13px; border-radius: 10px; background: #fff6f3; color: #a84a36; font-size: 12px; }
+.stream-status { margin: -8px 0 0 43px; color: #91a0b6; font-size: 11px; }
+.composer-wrap { flex: none; padding: 0 30px 16px; background: linear-gradient(180deg, rgba(255,255,255,0), #fff 15%); }
+.composer-wrap :deep(.chat-input) { max-width: 840px; margin: 0 auto; padding: 0; border: 0; background: transparent; }
+.composer-wrap :deep(.input-box) { padding: 10px 13px; border: 1px solid #dbe4f4; border-radius: 15px; box-shadow: 0 8px 28px rgba(39,79,150,.06); }
+.composer-wrap :deep(textarea) { padding: 8px 3px; min-height: 48px; font-size: 14px; }
+.composer-wrap :deep(.send-btn) { padding: 8px 17px; border-radius: 9px; }
+.composer-note { max-width: 840px; margin: 7px auto 0; text-align: right; color: #a0adbe; font-size: 11px; }
+.chat-main :deep(.bubble-row) { max-width: 100%; width: 100%; margin: 0; align-items: flex-start; gap: 12px; }
+.chat-main :deep(.bubble-row--user) { justify-content: flex-end; }
+.chat-main :deep(.bubble-avatar) { width: 31px; height: 31px; background: #edf3ff; box-shadow: none; }
+.chat-main :deep(.bubble-avatar--user) { display: none; }
+.chat-main :deep(.bubble) { max-width: min(78%, 680px); padding: 13px 17px; font-size: 14px; line-height: 1.7; box-shadow: none; }
+.chat-main :deep(.bubble--ai) { background: #f7f9fd; border: 0; border-radius: 5px 15px 15px 15px; color: #22324e; }
+.chat-main :deep(.bubble--user) { background: #eaf1ff; border-radius: 15px 15px 5px 15px; color: #18345e; }
+.chat-main :deep(.bubble__content) { font-size: 14px; line-height: 1.7; }
+.chat-main :deep(.bubble-system) { margin: 0; }
 @media (max-width: 640px) {
-  .review-banner-hint {
-    display: none;
-  }
-  .review-banner-desc {
-    font-size: 12px;
-  }
+  .chat-header { min-height: 68px; padding: 10px 16px; }
+  .header-switch, .review-banner-hint { display: none; }
+  .review-banner { padding: 8px 16px; }
+  .chat-main { padding: 24px 16px 18px; }
+  .composer-wrap { padding: 0 12px 10px; }
+  .chat-main :deep(.bubble) { max-width: 88%; }
+  .composer-note { font-size: 10px; }
 }
 </style>

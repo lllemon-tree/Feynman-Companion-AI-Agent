@@ -21,6 +21,12 @@ const routes = [
   },
   {
     path: '/home',
+    name: 'Home',
+    component: () => import('@/views/HomePage.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/study',
     name: 'Chat',
     component: () => import('@/views/ChatView.vue'),
     meta: { requiresAuth: true }
@@ -39,7 +45,7 @@ const routes = [
   },
   {
     path: '/',
-    redirect: '/upload'
+    redirect: '/home'
   }
 ]
 

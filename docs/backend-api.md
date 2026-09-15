@@ -99,6 +99,21 @@ Content-Type: application/json
 | `kp_id` | string | 新流程是 | 当前选择的知识点 ID。同一轮对话保持不变；省略时默认 `kp-demo` 仅用于兼容第三周 |
 | `user_input` | string | 是 | 用户输入内容，最大 500 字 |
 
+### 流式讲解（知识点学习页）
+
+`POST /api/v1/feynman/chat/stream` 使用完全相同的请求体，返回 `application/x-ndjson`，每行一个 JSON 事件：
+
+```json
+{"type":"status","stage":"loading","text":"正在读取学习进度…"}
+{"type":"status","stage":"retrieving","text":"正在检索相关教材内容…"}
+{"type":"status","stage":"generating","text":"正在结合你的讲解组织追问…"}
+{"type":"delta","text":"你提到了非负权。"}
+{"type":"status","stage":"saving","text":"正在保存本轮讲解与诊断…"}
+{"type":"done","data":{"reply_text":"你提到了非负权。为什么贪心选择成立？","next_action":"follow_up","card_preview":null,"final_report":null,"review_plan":null}}
+```
+
+`status` 用于展示当前处理阶段（诊断时 `generating` 文案会不同）；等待期间每 10 秒可能收到一个 `heartbeat` 保活事件，它不表示模型已输出。`delta` 只用于实时显示 `reply_text`；`done.data` 才是经过模型结构校验、会话保存和报告收口后的最终结果，前端应以它替换临时正文，再按原有 `next_action` 规则处理报告与复习。失败会返回 `{"type":"error","message":"..."}`，不要把此前收到的部分正文当成已完成的回答。原 `/chat` JSON 接口保留兼容。
+
 ### 响应结构
 
 所有成功响应都遵循：
@@ -147,7 +162,7 @@ Content-Type: application/json
   "msg": "success",
   "data": {
     "next_action": "guide_topic",
-    "reply_text": "这个问题先放一放，我们这轮只围绕 Dijkstra 算法。你可以先讲讲它解决什么问题。",
+    "reply_text": "先把话题拉回「Dijkstra 算法」吧。你觉得它主要解决什么问题？用一句自己的话说说就行。",
     "card_preview": null,
     "final_report": null
   }
@@ -172,6 +187,9 @@ Content-Type: application/json
         {
           "name": "理解深度",
           "score": 8,
+          "covered_points": ["说明了算法用于求最短路径"],
+          "gaps": ["还没有解释非负权为何保证贪心选择成立"],
+          "evidence": [{"quote": "Dijkstra 是用来求图中最短路径的算法", "observation": "正确指出了算法用途"}],
           "analysis": "对核心机制有基本理解，但正确性依据仍需补强。",
           "suggestion": "补充非负权前提与贪心选择成立原因。"
         },
@@ -195,10 +213,15 @@ Content-Type: application/json
         }
       ],
       "overall_comment": "本次讲解已经覆盖部分核心内容，后续重点是把非负权前提、贪心选择和松弛操作之间的因果关系讲清楚。"
-    }
+    },
+    "review_plan": {"reread_guide": [], "related_kps": []},
+    "provider": "deepseek",
+    "fallback_used": false
   }
 }
 ```
+
+新报告的每个维度可提供 `covered_points`、`gaps`、`evidence`；服务端会移除不在用户历史讲解中逐字出现的 `evidence.quote`，并清空无法由本轮检索页码核实的 `page_hint`、过滤不存在的关联知识点。旧报告缺少这些字段时仍可读取，前端应显示旧评语并说明没有逐句证据，不补造引用。`review_plan` 与 `final_report` 同级，知识点页和历史报告页都要展示；`provider=mock` 或 `fallback_used=true` 表示模拟/降级结果，不应当作正式诊断。
 
 ## 5. 重置会话
 

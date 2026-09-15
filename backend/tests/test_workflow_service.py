@@ -1,4 +1,6 @@
+import asyncio
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from sqlalchemy.pool import StaticPool
@@ -100,6 +102,45 @@ class WorkflowServiceTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(status_updates[-1]["status"], "failed")
         self.assertIn("rubric 生成失败", status_updates[-1]["error"])
+
+    async def test_rubrics_use_bounded_concurrency(self) -> None:
+        with Session(self.engine) as session:
+            for index in range(3):
+                session.add(
+                    KP(
+                        id=f"kp-extra-{index}", chapter_id="ch-current",
+                        name=f"额外知识点 {index}", page_start=1, page_end=1,
+                        status="pending_regenerate",
+                    )
+                )
+            session.commit()
+
+        active = 0
+        peak = 0
+        updates: list[dict] = []
+
+        async def fake_generate(kp, session):
+            nonlocal active, peak
+            active += 1
+            peak = max(peak, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            kp.status = "done"
+            session.add(kp)
+            session.commit()
+            return True
+
+        with (
+            patch.object(workflow_service, "engine", self.engine),
+            patch.object(workflow_service, "generate_rubric_for_kp", fake_generate),
+            patch.object(workflow_service, "get_settings", lambda: SimpleNamespace(max_rubric_concurrency=2)),
+            patch.object(workflow_service, "update_material_status", lambda **kwargs: updates.append(kwargs)),
+        ):
+            await workflow_service.run_full_extraction_workflow("mat-current")
+
+        self.assertEqual(peak, 2)
+        self.assertEqual(updates[-1]["status"], "done")
+        self.assertTrue(any("(4/4)" in update["step"] for update in updates))
 
     async def test_extraction_reports_progress_without_batch_timeout(self) -> None:
         status_updates: list[dict] = []

@@ -119,9 +119,11 @@ function handleFileInputChange(e) {
 
 function validateAndUpload(file) {
   if (isUploading.value) return
-  const isPdf = file.name.toLowerCase().endsWith('.pdf') && file.type === 'application/pdf'
+  // Some browsers label valid PDFs as application/octet-stream or leave type blank.
+  // The backend opens the file with PyMuPDF, so it remains the final format check.
+  const isPdf = file.name.toLowerCase().endsWith('.pdf')
   if (!isPdf) {
-    showToastMsg('仅支持文字版PDF文件')
+    showToastMsg('请选择 PDF 文件')
     return
   }
   if (file.size > 50 * 1024 * 1024) {
