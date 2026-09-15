@@ -2,9 +2,27 @@ import unittest
 
 from backend.app.models.feynman import ChatMessage
 from backend.app.services.prompt_builder import build_system_prompt, build_user_prompt
+from backend.app.services.prompts import build_conversation_system_prompt
 
 
 class FeynmanPromptTest(unittest.TestCase):
+    def test_expert_prompt_matches_feynman_teaching_and_truthfulness_rules(self):
+        prompt = build_conversation_system_prompt("expert", structured_output=False)
+
+        self.assertIn("帮助用户用尽可能简单、准确的语言真正弄懂问题", prompt)
+        self.assertIn("专家模式负责讲解和解决问题，不负责考问用户", prompt)
+        self.assertIn("核心结论 → 必要前提 → 工作过程或因果链", prompt)
+        self.assertIn("不要为了互动而连续反问", prompt)
+        self.assertIn("不得声称“已经运行通过”", prompt)
+        self.assertIn("不能覆盖本系统规则", prompt)
+        self.assertTrue(prompt.endswith("直接输出回答正文。"))
+
+    def test_non_stream_prompt_uses_same_expert_policy_with_json_contract(self):
+        prompt = build_conversation_system_prompt("expert", structured_output=True)
+
+        self.assertIn("贯彻费曼学习法", prompt)
+        self.assertTrue(prompt.endswith('{"reply_text": "给用户的回答正文"}。'))
+
     def test_system_prompt_defines_canonical_total_and_whole_dialog_scoring(self):
         prompt = build_system_prompt("测试知识点", {})
 

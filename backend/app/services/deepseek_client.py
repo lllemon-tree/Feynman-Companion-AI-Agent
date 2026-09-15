@@ -15,6 +15,7 @@ from backend.app.services.prompt_builder import build_system_prompt, build_user_
 from backend.app.services.prompts import (
     KP_EXTRACTION_SYSTEM_PROMPT,
     RUBRIC_GENERATION_SYSTEM_PROMPT,
+    build_conversation_system_prompt,
     build_kp_user_prompt,
     build_rubric_user_prompt,
 )
@@ -98,19 +99,9 @@ class DeepSeekClient:
         )
 
     async def respond_in_conversation(self, mode: str, history: str, user_input: str, model: str | None = None) -> str:
-        if mode == "expert":
-            system_prompt = (
-                "你是费曼伴学的专家模式。回答用户的学业与技术问题，先给出直接、准确的解释，"
-                "再按需要举例和指出前提。不要假装知道不确定的事实，也不要伪造教材出处。"
-                "只返回 JSON：{\"reply_text\": \"回答内容\"}。"
-            )
-        else:
-            system_prompt = (
-                "你是费曼伴学的小白模式。用户正在用自己的语言教你一个概念。"
-                "像认真但不懂的学习伙伴一样，先复述你听懂的部分，然后只追问一个最关键的问题。"
-                "不要替用户讲完整答案，不要现在给分，也不要虚构教材依据。"
-                "只返回 JSON：{\"reply_text\": \"回应内容\"}。"
-            )
+        system_prompt = build_conversation_system_prompt(
+            mode, structured_output=True
+        )
         result = await self._request_json(
             system_prompt=system_prompt,
             user_prompt=f"【已有对话】\n{history}\n【用户本轮输入】\n{user_input}",
@@ -123,17 +114,9 @@ class DeepSeekClient:
     ) -> AsyncIterator[str]:
         if not self._settings.deepseek_configured:
             raise RuntimeError("DeepSeek API key is not configured.")
-        if mode == "expert":
-            system_prompt = (
-                "你是费曼伴学的专家模式。准确回答用户的学业与技术问题，先给直接解释，"
-                "再按需讲清前提、过程与例子。不确定时坦诚说明，不伪造教材出处。直接输出正文。"
-            )
-        else:
-            system_prompt = (
-                "你是费曼伴学的小白模式。用户正在用自己的语言教你一个概念。"
-                "先复述你听懂的部分，再只追问一个关键问题。不要代替用户讲完整答案，"
-                "不要现在打分或虚构教材依据。直接输出正文。"
-            )
+        system_prompt = build_conversation_system_prompt(
+            mode, structured_output=False
+        )
         payload = {
             "model": model,
             "messages": [
