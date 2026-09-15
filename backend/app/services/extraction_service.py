@@ -1,6 +1,8 @@
+import asyncio
 import json
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlmodel import Session, select
@@ -9,6 +11,44 @@ from backend.app.core.database import engine
 from backend.app.core.config import get_settings
 from backend.app.models.knowledge import Chapter, Chunk, KP, Material, RubricSchema
 from backend.app.services.deepseek_client import DeepSeekClient
+
+
+@dataclass(frozen=True)
+class ExtractionUnit:
+    chunk_id: str
+    chapter_id: str | None
+    page_no: int
+    text: str
+
+
+def group_chunks_for_extraction(chunks: list[Chunk], max_chars: int = 1500) -> list[ExtractionUnit]:
+    """Merge adjacent same-page chunks for fewer model calls; keep original chunks for citations."""
+    units: list[ExtractionUnit] = []
+    current: ExtractionUnit | None = None
+    for chunk in sorted(chunks, key=lambda item: (item.page_no, item.seq)):
+        if current is not None and (
+            current.page_no == chunk.page_no
+            and current.chapter_id == chunk.chapter_id
+            and len(current.text) + len(chunk.text) + 1 <= max_chars
+        ):
+            current = ExtractionUnit(
+                chunk_id=current.chunk_id,
+                chapter_id=current.chapter_id,
+                page_no=current.page_no,
+                text=f"{current.text}\n{chunk.text}",
+            )
+        else:
+            if current is not None:
+                units.append(current)
+            current = ExtractionUnit(
+                chunk_id=chunk.id,
+                chapter_id=chunk.chapter_id,
+                page_no=chunk.page_no,
+                text=chunk.text,
+            )
+    if current is not None:
+        units.append(current)
+    return units
 
 
 async def extract_kps_for_material(
@@ -40,7 +80,8 @@ async def extract_kps_for_material(
         material = session.get(Material, material_id)
         material_user_id = material.user_id if material else "guest"
 
-        print(f"开始为教材 {material_id} 抽取知识点，共需处理 {len(chunks)} 个切片。")
+        units = group_chunks_for_extraction(chunks)
+        print(f"开始为教材 {material_id} 抽取知识点，{len(chunks)} 个原始切片合并为 {len(units)} 次模型请求。")
 
         existing_statement = (
             select(KP)
@@ -53,31 +94,43 @@ async def extract_kps_for_material(
             for kp in existing_kps
         }
 
-        # 2. 遍历切片，逐个调用大模型进行抽取
-        # MVP 阶段采用最稳妥的 for 循环串行调用，避免大批量并发触发 DeepSeek 的并发限流
-        total_chunks = len(chunks)
-        for idx, chunk in enumerate(chunks):
-            try:
-                # 打印进度提示
-                print(f"正在处理切片 {idx + 1}/{len(chunks)} (页码: {chunk.page_no})...")
-                
-                # 调用大模型，传入切片文本和物理页码
-                response = await client.extract_knowledge(
-                    chunk_text=chunk.text,
-                    page_no=chunk.page_no
-                )
+        # 2. 只并发模型请求，数据库写入仍在单一 Session 内顺序执行。
+        # 上限默认 2，避免把整本书的请求同时打到模型服务。
+        total_chunks = len(units)
+        semaphore = asyncio.Semaphore(settings.max_extraction_concurrency)
+
+        async def extract_one(item: ExtractionUnit):
+            async with semaphore:
+                try:
+                    response = await client.extract_knowledge(
+                        chunk_text=item.text,
+                        page_no=item.page_no,
+                    )
+                    return item, response, None
+                except Exception as exc:
+                    return item, None, exc
+
+        tasks = [asyncio.create_task(extract_one(unit)) for unit in units]
+        try:
+            for completed, task in enumerate(asyncio.as_completed(tasks), start=1):
+                chunk, response, error = await task
+                if error is not None:
+                    print(f"抽取单元 {chunk.chunk_id} (页码 {chunk.page_no}) 提取失败: {error}")
+                    if progress_callback is not None:
+                        progress_callback(completed, total_chunks)
+                    continue
                 if not response.knowledge_points:
                     print(f"警告：第 {chunk.page_no} 页未提取到任何知识点。")
-                
-                # 3. 将 Pydantic 对象转换为 SQLModel 对象并落库
+
+                # 3. 将返回结果顺序写入数据库；相同章节与名称仍去重。
                 for kp_data in response.knowledge_points:
                     if chunk.chapter_id is None:
                         continue
                     key = (chunk.chapter_id, kp_data.name.strip().lower())
                     existing_kp = kp_by_name.get(key)
                     if existing_kp is not None:
-                        existing_kp.page_start = min(existing_kp.page_start, kp_data.page_no)
-                        existing_kp.page_end = max(existing_kp.page_end, kp_data.page_no)
+                        existing_kp.page_start = min(existing_kp.page_start, chunk.page_no)
+                        existing_kp.page_end = max(existing_kp.page_end, chunk.page_no)
                         session.add(existing_kp)
                         continue
 
@@ -86,8 +139,8 @@ async def extract_kps_for_material(
                         chapter_id=chunk.chapter_id,
                         name=kp_data.name,
                         summary=kp_data.summary,
-                        page_start=kp_data.page_no,
-                        page_end=kp_data.page_no,
+                        page_start=chunk.page_no,
+                        page_end=chunk.page_no,
                         status="pending_regenerate",
                         user_id=material_user_id,
                     )
@@ -95,13 +148,12 @@ async def extract_kps_for_material(
                     kp_by_name[key] = new_kp
                     total_kps_extracted += 1
                     
-            except Exception as e:
-                # 捕获异常，保证某个切片失败时，后续切片能继续处理
-                print(f"切片 {chunk.id} (页码 {chunk.page_no}) 提取失败: {str(e)}")
-                continue
-            finally:
                 if progress_callback is not None:
-                    progress_callback(idx + 1, total_chunks)
+                    progress_callback(completed, total_chunks)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
         
         # 4. 批量提交所有新产生的知识点到 feynman.db
         session.commit()

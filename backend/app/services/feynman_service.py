@@ -1,6 +1,6 @@
 import logging
 from functools import lru_cache
-from typing import Optional
+from typing import Callable, Optional
 
 from backend.app.core.config import get_settings
 from backend.app.core.database import engine
@@ -39,6 +39,18 @@ class ReviewPersistenceError(Exception):
     """Review result was generated but its atomic database write failed."""
 
 
+def build_study_greeting(kp_name: str) -> str:
+    if any(word in kp_name for word in ("区别", "对比", "比较")):
+        return (
+            f"我们来学习「{kp_name}」。先说说你会怎样比较它们，"
+            "最关键的差异是什么？不确定的地方也可以直接讲出来。"
+        )
+    return (
+        f"我们来学习「{kp_name}」。你目前怎么理解它？"
+        "先讲你最确定的一点，我会根据你的讲解继续追问。"
+    )
+
+
 class FeynmanService:
     def __init__(
         self,
@@ -73,6 +85,8 @@ class FeynmanService:
         self,
         request: FeynmanChatRequest,
         user_id: str = GUEST_USER_ID,
+        on_reply_delta: Optional[Callable[[str], None]] = None,
+        on_status: Optional[Callable[[str, str], None]] = None,
     ) -> FeynmanChatData:
         print(f"📝 user_input: {request.user_input.strip()[:120]}")
         if not request.user_input.strip():
@@ -83,10 +97,33 @@ class FeynmanService:
             self._finalize_report_safely(session, session.final_response)
             return session.final_response
         # Graph 的 load_context 节点统一加载画像，避免在两层重复查库。
-        response = await self._graph.run(request=request, session=session)
+        response = await self._graph.run(
+            request=request, session=session,
+            on_reply_delta=on_reply_delta, on_status=on_status,
+        )
+        response.provider = session.last_provider
+        response.fallback_used = session.fallback_used
+        self._keep_known_related_knowledge_points(response, session.material_id)
+        if on_status:
+            on_status("saving", "正在保存本轮讲解与诊断…")
         self._store.save(session)
         self._finalize_report_safely(session, response)
         return response
+
+    def _keep_known_related_knowledge_points(
+        self, response: FeynmanChatData, material_id: Optional[str],
+    ) -> None:
+        if response.review_plan is None:
+            return
+        verified = []
+        for item in response.review_plan.related_kps:
+            try:
+                point = self._kp_provider.get(item.kp_id)
+            except Exception:
+                point = None
+            if point is not None and point.name == item.kp_name and point.material_id == material_id:
+                verified.append(item)
+        response.review_plan.related_kps = verified
 
     def _finalize_report_safely(
         self,
@@ -112,7 +149,7 @@ class FeynmanService:
             raise ValueError("knowledge point not found")
         is_review = False
         review_focus = []
-        reply_text = f"请你向我讲解一下{knowledge_point.name}的核心原理，讲得越详细越好。"
+        reply_text = build_study_greeting(knowledge_point.name)
 
         # 如果传入了 session_id 且不是游客，尝试加载复习上下文
         if session_id and user_id != GUEST_USER_ID:

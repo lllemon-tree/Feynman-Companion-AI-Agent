@@ -159,6 +159,28 @@ class MaterialServicesTest(unittest.TestCase):
         self.assertEqual([chapter.title for chapter in chapters], ["全文（无目录）"])
         self.assertGreaterEqual(len(chunks), 1)
 
+    def test_pdf_with_three_blank_cover_pages_is_not_rejected(self) -> None:
+        document = fitz.open()
+        for _ in range(3):
+            document.new_page()
+        page = document.new_page()
+        page.insert_text((50, 50), "Dijkstra computes shortest paths from one source.")
+        pdf_bytes = document.tobytes()
+        document.close()
+
+        with (
+            patch.object(pdf_service, "engine", self.engine),
+            patch.object(pdf_service.os, "makedirs"),
+            patch("builtins.open", mock_open()),
+        ):
+            material_id = pdf_service.save_and_process_pdf(
+                pdf_bytes, subject="计算机", filename="含封面教材.pdf"
+            )
+
+        with Session(self.engine) as session:
+            chunks = session.exec(select(Chunk).where(Chunk.material_id == material_id)).all()
+        self.assertEqual([chunk.page_no for chunk in chunks], [4])
+
     def test_pdf_with_wrapper_title_uses_level_two_chapters(self) -> None:
         pdf_bytes = _build_text_pdf(
             with_toc=True,

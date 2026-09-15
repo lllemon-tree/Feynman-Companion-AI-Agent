@@ -53,7 +53,7 @@ async function handleSubmit() {
   if (isLogin.value) {
     success = await authStore.login(username.value.trim(), password.value)
     if (success) {
-      const redirect = router.currentRoute.value.query.redirect || '/upload'
+      const redirect = router.currentRoute.value.query.redirect || '/home'
       router.push(redirect)
     }
   } else {
@@ -62,7 +62,7 @@ async function handleSubmit() {
       // 注册成功后自动登录
       const loginSuccess = await authStore.login(username.value.trim(), password.value)
       if (loginSuccess) {
-        const redirect = router.currentRoute.value.query.redirect || '/upload'
+        const redirect = router.currentRoute.value.query.redirect || '/home'
         router.push(redirect)
       }
     }
@@ -71,13 +71,13 @@ async function handleSubmit() {
 
 function handleGuestMode() {
   localStorage.setItem('feynman_guest', 'true')
-  router.push('/select')
+  router.push('/home')
 }
 </script>
 
 <template>
   <div class="auth-page">
-    <div class="auth-logo-btn" @click="router.push('/select')">费曼伴学</div>
+    <div class="auth-logo-btn" @click="router.push('/home')">费曼伴学</div>
     <div class="auth-container">
       <div class="auth-header">
         <h1 class="auth-title">费曼伴学</h1>

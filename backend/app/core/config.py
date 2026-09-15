@@ -28,9 +28,12 @@ class Settings(BaseModel):
     llm_provider: str = "mock"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-flash"
+    free_chat_models: tuple[str, ...] = ("deepseek-flash", "deepseek-v4-pro")
     request_timeout_seconds: float = 30.0
     max_follow_ups: int = 3
+    max_extraction_concurrency: int = 2
+    max_rubric_concurrency: int = 2
     material_mock: bool = False
     cors_allow_origins: List[str] = ["*"]
     auth_secret_key: str = DEFAULT_AUTH_SECRET_KEY
@@ -69,9 +72,16 @@ def get_settings() -> Settings:
         llm_provider=pick("LLM_PROVIDER", "mock").lower(),
         deepseek_api_key=pick("DEEPSEEK_API_KEY", ""),
         deepseek_base_url=pick("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
-        deepseek_model=pick("DEEPSEEK_MODEL", "deepseek-chat"),
+        deepseek_model=pick("DEEPSEEK_MODEL", "deepseek-flash"),
+        free_chat_models=tuple(dict.fromkeys(
+            model.strip() for model in pick(
+                "DEEPSEEK_CHAT_MODELS", "deepseek-flash,deepseek-v4-pro"
+            ).split(",") if model.strip()
+        )),
         request_timeout_seconds=pick_float("REQUEST_TIMEOUT_SECONDS", 30.0),
         material_mock=pick_bool("MATERIAL_MOCK", False),
+        max_extraction_concurrency=max(1, min(4, pick_int("MAX_EXTRACTION_CONCURRENCY", 2))),
+        max_rubric_concurrency=max(1, min(4, pick_int("MAX_RUBRIC_CONCURRENCY", 2))),
         auth_secret_key=pick("AUTH_SECRET_KEY", DEFAULT_AUTH_SECRET_KEY),
         auth_token_expire_minutes=pick_int("AUTH_TOKEN_EXPIRE_MINUTES", 1440),
     )

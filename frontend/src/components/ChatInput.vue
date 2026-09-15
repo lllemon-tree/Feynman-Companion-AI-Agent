@@ -1,5 +1,6 @@
 <script setup>
 import { ref, nextTick, watch, computed } from 'vue'
+import { enterAction } from '@/utils/imeKeydown'
 
 const props = defineProps({
   locked: { type: Boolean, default: false },
@@ -10,6 +11,9 @@ const emit = defineEmits(['send', 'restart'])
 const MAX_LENGTH = 500
 const text = ref('')
 const textareaEl = ref(null)
+const isComposing = ref(false)
+const submitting = ref(false)
+let compositionEndedAt = -Infinity
 
 const charCount = computed(() => text.value.length)
 const isOverLimit = computed(() => charCount.value > MAX_LENGTH)
@@ -23,17 +27,30 @@ function autoGrow() {
 
 function handleSubmit() {
   const value = text.value.trim()
-  if (!value || props.locked || props.finished || isOverLimit.value) return
-  emit('send', value)
+  if (!value || props.locked || props.finished || submitting.value || isOverLimit.value || isComposing.value) return
+  submitting.value = true
   text.value = ''
   nextTick(autoGrow)
+  emit('send', value, (succeeded) => {
+    submitting.value = false
+    if (!succeeded && !text.value) {
+      text.value = value
+      nextTick(autoGrow)
+    }
+  })
 }
 
 function handleKeydown(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  const action = enterAction(e, isComposing.value, compositionEndedAt)
+  if (action === 'compose') return
+  if (action === 'skip') {
+    e.preventDefault()
+    return
+  }
+  if (action === 'send') {
     e.preventDefault()
     handleSubmit()
-  } else if (e.key === 'Enter' && e.shiftKey) {
+  } else if (action === 'newline') {
     e.preventDefault()
     const el = textareaEl.value
     if (el) {
@@ -48,7 +65,14 @@ function handleKeydown(e) {
   }
 }
 
+function handleCompositionEnd() {
+  isComposing.value = false
+  compositionEndedAt = performance.now()
+  handleInput()
+}
+
 function handleInput() {
+  if (isComposing.value) return
   if (text.value.length > MAX_LENGTH) {
     text.value = text.value.substring(0, MAX_LENGTH)
   }
@@ -87,6 +111,8 @@ watch(text, () => nextTick(autoGrow))
         :placeholder="locked ? 'AI 小白正在努力思考你的逻辑…' : '请开始你的费曼讲解...'"
         :disabled="locked"
         @keydown="handleKeydown"
+        @compositionstart="isComposing = true"
+        @compositionend="handleCompositionEnd"
         @input="handleInput"
       />
       <div class="input-footer">
@@ -95,7 +121,7 @@ watch(text, () => nextTick(autoGrow))
         </span>
         <button
           class="send-btn"
-          :disabled="locked || !text.trim() || isOverLimit"
+          :disabled="locked || submitting || !text.trim() || isOverLimit"
           @click="handleSubmit"
         >
           发送

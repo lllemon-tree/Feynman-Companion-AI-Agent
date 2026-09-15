@@ -12,6 +12,17 @@ class FeynmanPromptTest(unittest.TestCase):
         self.assertIn("已经正确说明的内容，必须认定为已覆盖", prompt)
         self.assertIn("严格等于四个维度 score 之和", prompt)
         self.assertIn("它不是0-10平均分", prompt)
+        self.assertIn("3轮是安全上限，不是必须完成的任务量", prompt)
+        self.assertIn("合理推出，都算已覆盖", prompt)
+        self.assertIn("禁止再提出任何问题", prompt)
+        self.assertIn("同一个底层缺口最多作为一个维度的主要扣分项", prompt)
+        self.assertIn("复述性覆盖", prompt)
+        self.assertIn("8分不是安全默认值", prompt)
+        self.assertIn("不得仅因没有分点、小标题或代码而扣分", prompt)
+        self.assertIn("如果四项恰好完全相同", prompt)
+        self.assertIn("这里是四选一而不是全部必做", prompt)
+        self.assertIn("费曼讲解评估的是能否用自己的话把核心讲明白", prompt)
+        self.assertIn("做一次“原话冲突检查”", prompt)
 
     def test_user_prompt_keeps_early_user_answers_in_cumulative_explanation(self):
         messages = [

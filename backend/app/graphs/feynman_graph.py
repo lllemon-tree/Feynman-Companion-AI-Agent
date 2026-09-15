@@ -1,4 +1,5 @@
-from typing import Literal, Optional
+import re
+from typing import Callable, Literal, Optional
 
 from typing_extensions import TypedDict
 
@@ -13,6 +14,7 @@ from backend.app.services.kp_provider import (
     KnowledgePointProvider,
 )
 from backend.app.services.rag_retriever import RAGRetriever
+from backend.app.services.report_quality import sanitize_report_against_user_text
 from backend.app.services.review_context_service import DefaultReviewContextProvider, ReviewContextProvider, safe_load_review_context
 from backend.app.services.session_store import SessionState
 from backend.app.models.user_profile import UserProfileResponse
@@ -31,6 +33,8 @@ class FeynmanGraphState(TypedDict, total=False):
     grounding_chunks: list[RetrievedChunk] # 用于支持回答的检索到的文本块
     user_profile: Optional[UserProfileResponse]
     review_context: Optional[ReviewContext]
+    on_reply_delta: Optional[Callable[[str], None]]
+    on_status: Optional[Callable[[str, str], None]]
 
 class FeynmanGraph:
     def __init__(
@@ -59,8 +63,14 @@ class FeynmanGraph:
         request: FeynmanChatRequest,
         session: SessionState,
         profile: Optional[UserProfileResponse] = None,
+        on_reply_delta: Optional[Callable[[str], None]] = None,
+        on_status: Optional[Callable[[str, str], None]] = None,
     ) -> FeynmanChatData:
-        result = await self._graph.ainvoke({"request": request, "session": session, "user_profile": profile})
+        result = await self._graph.ainvoke({
+            "request": request, "session": session, "user_profile": profile,
+            "on_reply_delta": on_reply_delta,
+            "on_status": on_status,
+        })
         return result["response"]
 
     def draw_mermaid(self) -> str:
@@ -193,8 +203,8 @@ class FeynmanGraph:
             "response": FeynmanChatData(
                 next_action=NextAction.GUIDE_TOPIC,
                 reply_text=(
-                    f"这个问题先放一放，我们这轮只围绕{knowledge_point.name}。"
-                    "你可以先讲讲它解决什么问题。"
+                    f"先把话题拉回「{knowledge_point.name}」吧。"
+                    "你觉得它主要解决什么问题？用一句自己的话说说就行。"
                 ),
             ),
             "provider": "rule",
@@ -220,6 +230,8 @@ class FeynmanGraph:
         }
     # 语义搜索
     async def _retrieve(self, state: FeynmanGraphState) -> FeynmanGraphState:
+        if state.get("on_status"):
+            state["on_status"]("retrieving", "正在检索相关教材内容…")
         request = state["request"]
         knowledge_point = state["knowledge_point"]
         assert knowledge_point is not None
@@ -255,6 +267,8 @@ class FeynmanGraph:
         return {"grounding_chunks": merged}
 
     async def _evaluate(self, state: FeynmanGraphState) -> FeynmanGraphState:
+        if state.get("on_status"):
+            state["on_status"]("generating", "正在结合你的讲解组织追问…")
         session = state["session"]
         request = state["request"]
         knowledge_point = state["knowledge_point"]
@@ -262,7 +276,12 @@ class FeynmanGraph:
         review_context = state.get("review_context")
         assert knowledge_point is not None
         try:
-            response = await self._llm_client.evaluate(
+            evaluator = self._llm_client.evaluate
+            extra_kwargs = {}
+            if state.get("on_reply_delta") and hasattr(self._llm_client, "evaluate_stream"):
+                evaluator = self._llm_client.evaluate_stream
+                extra_kwargs["on_reply_delta"] = state["on_reply_delta"]
+            response = await evaluator(
                 messages=session.messages,
                 user_input=request.user_input.strip(),
                 follow_up_count=session.follow_up_count,
@@ -271,14 +290,23 @@ class FeynmanGraph:
                 grounding_chunks=state.get("grounding_chunks", []),
                 profile=profile,
                 review_context=review_context,
+                **extra_kwargs,
             )
             response = _normalize_contract(response)
+            response = _ensure_initial_understanding_check(
+                response=response,
+                session=session,
+                user_input=request.user_input.strip(),
+                knowledge_point=knowledge_point,
+            )
             return {
                 "response": response,
                 "provider": self._primary_provider_name,
                 "fallback_used": False,
             }
         except Exception:
+            if state.get("on_status"):
+                state["on_status"]("fallback", "主模型暂不可用，正在尝试备用回复…")
             response = await self._fallback_client.evaluate(
                 messages=session.messages,
                 user_input=request.user_input.strip(),
@@ -290,9 +318,17 @@ class FeynmanGraph:
                 review_context=review_context,
             )
             response = _normalize_contract(response)
+            response = _ensure_initial_understanding_check(
+                response=response,
+                session=session,
+                user_input=request.user_input.strip(),
+                knowledge_point=knowledge_point,
+            )
             return {"response": response, "provider": "mock", "fallback_used": True}
 
     async def _report(self, state: FeynmanGraphState) -> FeynmanGraphState:
+        if state.get("on_status"):
+            state["on_status"]("generating", "正在逐维分析你的讲解并生成诊断…")
         session = state["session"]
         request = state["request"]
         knowledge_point = state["knowledge_point"]
@@ -300,7 +336,12 @@ class FeynmanGraph:
         review_context = state.get("review_context")
         assert knowledge_point is not None
         try:
-            response = await self._llm_client.evaluate(
+            evaluator = self._llm_client.evaluate
+            extra_kwargs = {}
+            if state.get("on_reply_delta") and hasattr(self._llm_client, "evaluate_stream"):
+                evaluator = self._llm_client.evaluate_stream
+                extra_kwargs["on_reply_delta"] = state["on_reply_delta"]
+            response = await evaluator(
                 messages=session.messages,
                 user_input=request.user_input.strip(),
                 follow_up_count=self._max_follow_ups,
@@ -309,6 +350,7 @@ class FeynmanGraph:
                 grounding_chunks=state.get("grounding_chunks", []),
                 profile=profile,
                 review_context=review_context,
+                **extra_kwargs,
             )
             response = _normalize_contract(response)
             return {
@@ -317,6 +359,8 @@ class FeynmanGraph:
                 "fallback_used": False,
             }
         except Exception:
+            if state.get("on_status"):
+                state["on_status"]("fallback", "主模型暂不可用，正在尝试备用诊断…")
             response = await self._fallback_client.evaluate(
                 messages=session.messages,
                 user_input=request.user_input.strip(),
@@ -336,6 +380,34 @@ class FeynmanGraph:
         request = state["request"]
         route = state["route"]
         response = _normalize_contract(state["response"])
+
+        # 模型引用的“用户原话”必须真的出现在历史用户输入中；无证据时宁可留空。
+        if response.final_report is not None:
+            user_texts = [
+                message.content for message in session.messages if message.role == "user"
+            ] + [request.user_input.strip()]
+            for dimension in response.final_report.dimensions:
+                dimension.evidence = [
+                    item for item in dimension.evidence
+                    if any(item.quote in user_text for user_text in user_texts)
+                ]
+            response = sanitize_report_against_user_text(response, user_texts)
+        if response.review_plan is not None:
+            known_pages = {chunk.page_no for chunk in state.get("grounding_chunks", [])}
+            for item in response.review_plan.reread_guide:
+                page_numbers = set()
+                for start, end in re.findall(
+                    r"(\d+)\s*(?:[-—~～至到]\s*(\d+)\s*)?页", item.page_hint
+                ):
+                    first, last = int(start), int(end or start)
+                    if last < first or last - first > 20:
+                        page_numbers.clear()
+                        break
+                    page_numbers.update(range(first, last + 1))
+                if not page_numbers or not page_numbers.issubset(known_pages):
+                    item.page_hint = ""
+                else:
+                    item.page_hint = "、".join(f"第{page}页" for page in sorted(page_numbers))
 
         if route == "off_topic":
             session.off_topic_count += 1
@@ -381,7 +453,57 @@ def _normalize_contract(data: FeynmanChatData) -> FeynmanChatData:
     if data.next_action in {NextAction.FOLLOW_UP, NextAction.GUIDE_TOPIC}:
         data.card_preview = None
         data.final_report = None
+        data.review_plan = None
     if data.next_action == NextAction.GENERATE_REPORT:
         if data.card_preview is None or data.final_report is None:
             raise ValueError("generate_report requires card_preview and final_report")
+        # 报告已经生成时，聊天气泡不能再抛出一个新问题。模型偶尔会同时
+        # 返回 generate_report 和追问文案，这会让用户误以为还必须继续作答。
+        if "？" in data.reply_text or "?" in data.reply_text:
+            focus = data.card_preview.summary.rstrip("。；;！!")
+            data.reply_text = (
+                "这轮讲解可以收束了。诊断报告已经生成，"
+                f"下面会说明你已经覆盖的内容，以及仍可补强的重点：{focus}。"
+            )
     return data
+
+
+def _ensure_initial_understanding_check(
+    response: FeynmanChatData,
+    session: SessionState,
+    user_input: str,
+    knowledge_point: KnowledgePoint,
+) -> FeynmanChatData:
+    """Keep a textbook diagnosis from ending after an unverified first explanation.
+
+    A correct definition is useful evidence, but the teaching flow should normally
+    observe one application or causal explanation before producing a scored report.
+    The model prompt makes that pedagogical choice; this guard prevents an occasional
+    premature ``generate_report`` from skipping the interaction entirely.
+    """
+    if response.next_action != NextAction.GENERATE_REPORT:
+        return response
+    if session.follow_up_count > 0 or _requests_immediate_report(user_input):
+        return response
+    return FeynmanChatData(
+        next_action=NextAction.FOLLOW_UP,
+        reply_text=(
+            f"你已经把「{knowledge_point.name}」的定义、基本做法和作用讲清楚了。"
+            "为了确认你不只是记住了概念，再补一个最小例子："
+            "它在这个例子里具体怎样工作，又避免了什么问题？"
+        ),
+    )
+
+
+def _requests_immediate_report(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    requests = (
+        "直接生成报告",
+        "立即生成报告",
+        "现在生成报告",
+        "直接出报告",
+        "结束并评分",
+        "不用追问",
+        "不要追问",
+    )
+    return any(request in compact for request in requests)

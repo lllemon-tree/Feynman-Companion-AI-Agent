@@ -37,7 +37,8 @@ cp .env.local.example .env.local
 ```env
 DEEPSEEK_API_KEY=your_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_CHAT_MODELS=deepseek-flash,deepseek-v4-pro
 LLM_PROVIDER=deepseek
 REQUEST_TIMEOUT_SECONDS=30
 AUTH_SECRET_KEY=replace_with_a_long_random_secret
@@ -91,12 +92,12 @@ npm run build
 
 ## Demo Flow
 
-1. 用户上传有目录的文字版 PDF，前端轮询教材解析状态。
-2. 后端完成章节切片、知识点抽取和四维 rubric 生成并写入 SQLite。
-3. 用户按科目、教材、章节、知识点选择真实知识点。
-4. 游客直接使用，登录用户通过 Bearer Token 绑定自己的持久化会话。
-5. 前端请求动态 greeting，并将 `session_id`、`kp_id` 和讲解内容发送给 LangGraph。
-6. LangGraph 检索当前教材相关切片，并与知识点固定页码原文一起注入评判 Prompt。
-7. 后端最多追问 3 轮，随后返回四维诊断报告；DeepSeek 失败时降级 Mock。
+1. 登录后进入自由对话首页：专家模式回答学业问题，小白模式听用户讲解并给出无教材、无数值分数的反馈。模型可在输入框下方切换，普通回复流式显示。
+2. 教材知识点学习仍是独立模块。用户上传可提取文字的 PDF，前端轮询解析状态；无 PDF 书签也可解析，只是当前会归入“全文（无目录）”。扫描件 OCR 尚未实现。
+3. 后端保存原始切片用于引用，把同页相邻切片合并后抽取知识点，再生成四维 rubric 并写入 SQLite。
+4. 用户按科目、教材、章节、知识点进入教材讲解；动态引导语与 `session_id`、`kp_id` 一起维持 LangGraph 会话，历史记录可继续。
+5. LangGraph 检索当前教材切片及知识点固定页码原文，生成追问与四维诊断报告。游客可体验教材学习；自由对话及历史保存需要登录。
+
+`DEEPSEEK_MODEL` 是教材处理与未指定模型时的后端默认值；首页可选模型由 `DEEPSEEK_CHAT_MODELS` 控制。更改 `.env.local` 后重启后端。当前首页流式输出不代表教材讲解/报告也已流式化。
 
 详细接口见 `docs/backend-api.md`。

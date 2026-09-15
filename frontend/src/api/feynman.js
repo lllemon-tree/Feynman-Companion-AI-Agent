@@ -106,6 +106,25 @@ export async function chatWithAgent(sessionId, userInput, kpId) {
   return data?.data
 }
 
+export async function streamChatWithAgent(sessionId, userInput, kpId, onDelta, onStatus) {
+  if (USE_FEYNMAN_MOCK) {
+    onStatus?.('generating', '正在生成讲解…')
+    const result = await mockChat(sessionId, userInput)
+    if (result?.reply_text) onDelta?.(result.reply_text)
+    return result
+  }
+  const token = localStorage.getItem('feynman_token')
+  const response = await fetch(`${BASE_URL}/feynman/chat/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify({ session_id: sessionId, kp_id: kpId, user_input: userInput })
+  })
+  return readNdjsonResponse(response, token, onDelta, onStatus)
+}
+
 export async function fetchGreeting(kpId = null, sessionId = null) {
   if (USE_FEYNMAN_MOCK) {
     await delay(400)
@@ -450,6 +469,95 @@ export async function getSessionDetail(sessionId) {
     }
   }
   const data = await http.get(`/feynman/sessions/${sessionId}`)
+  return data?.data
+}
+
+// 无教材自由对话：专家问答与小白讲解共用会话，模式按每轮消息记录。
+export async function createConversation() {
+  const data = await http.post('/conversations')
+  return data?.data
+}
+
+export async function getConversationModels() {
+  const data = await http.get('/conversations/models')
+  return data?.data
+}
+
+export async function listConversations() {
+  const data = await http.get('/conversations')
+  return data?.data || []
+}
+
+export async function getConversation(conversationId) {
+  const data = await http.get(`/conversations/${conversationId}`)
+  return data?.data
+}
+
+export async function sendConversationMessage(conversationId, content, mode, model) {
+  const data = await http.post(`/conversations/${conversationId}/messages`, { content, mode, model })
+  return data?.data
+}
+
+export async function streamConversationMessage(conversationId, content, mode, model, onDelta) {
+  const token = localStorage.getItem('feynman_token')
+  const response = await fetch(`${BASE_URL}/conversations/${encodeURIComponent(conversationId)}/messages/stream`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: JSON.stringify({ content, mode, model })
+  })
+  return readNdjsonResponse(response, token, onDelta)
+}
+
+async function readNdjsonResponse(response, token, onDelta, onStatus) {
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    if (response.status === 401 && token) {
+      localStorage.removeItem('feynman_token')
+      localStorage.removeItem('feynman_user')
+      window.location.href = '/login'
+    }
+    throw new Error(body.detail || `发送失败（${response.status}）`)
+  }
+  if (!response.body) throw new Error('浏览器不支持流式回复，请重试')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ''
+  let result = null
+  const handleLine = (line) => {
+    if (!line.trim()) return
+    const event = JSON.parse(line)
+    if (event.type === 'delta') onDelta?.(event.text || '')
+    if (event.type === 'status') onStatus?.(event.stage || '', event.text || '')
+    if (event.type === 'done') result = event.data
+    if (event.type === 'error') throw new Error(event.message || '模型响应失败，请重试')
+  }
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      pending += decoder.decode(value, { stream: true })
+      const lines = pending.split('\n')
+      pending = lines.pop() || ''
+      for (const line of lines) handleLine(line)
+    }
+    pending += decoder.decode()
+    if (pending.trim()) handleLine(pending)
+  } catch (error) {
+    await reader.cancel().catch(() => {})
+    throw error
+  } finally {
+    reader.releaseLock()
+  }
+  if (!result) throw new Error('流式回复中断，请重试')
+  return result
+}
+
+export async function finishFreeExplanation(conversationId, model) {
+  const data = await http.post(`/conversations/${conversationId}/assessment`, { mode: 'beginner', model })
   return data?.data
 }
 

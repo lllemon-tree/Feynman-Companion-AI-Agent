@@ -1,14 +1,16 @@
-import { defineStore } from 'pinia'
+import { acceptHMRUpdate, defineStore } from 'pinia'
 import { v4 as uuidv4 } from 'uuid'
-import { chatWithAgent, fetchGreeting, resetFeynmanSession, getReviewResult } from '@/api/feynman'
+import { streamChatWithAgent, fetchGreeting, resetFeynmanSession, getReviewResult, getSessionDetail } from '@/api/feynman'
+import { appendReactiveMessage } from '@/utils/reactiveMessage'
 
 export const useChatStore = defineStore('chat', {
   state: () => ({
     sessionId: '',
     messages: /** @type {{id: string, role: 'user' | 'ai' | 'system', content: string, ts: number}[]} */ ([]),
     isLocked: false,
+    streamStatus: '',
     isReportReady: false,
-    reportData: /** @type {{cardPreview: object, finalReport: object} | null} */ (null),
+    reportData: /** @type {{cardPreview: object, finalReport: object, reviewPlan: object | null, provider: string | null, fallbackUsed: boolean} | null} */ (null),
     errorMsg: '',
     kpId: '',
     kpName: '',
@@ -42,6 +44,38 @@ export const useChatStore = defineStore('chat', {
   },
 
   actions: {
+    async restoreSession(sessionId) {
+      const detail = await getSessionDetail(sessionId)
+      this.sessionId = detail.session_id
+      this.kpId = detail.kp_id || ''
+      this.kpName = detail.kp_name || ''
+      this.materialId = detail.material_id || ''
+      this.chapterId = detail.chapter_id || ''
+      this.messages = (detail.chat_history || []).map(item => ({
+        id: uuidv4(),
+        role: item.role === 'assistant' ? 'ai' : item.role,
+        content: item.content,
+        ts: Date.now()
+      }))
+      this.isReportReady = Boolean(detail.report_data?.final_report)
+      this.reportData = this.isReportReady
+        ? {
+            cardPreview: detail.report_data.card_preview || null,
+            finalReport: detail.report_data.final_report,
+            reviewPlan: detail.report_data.review_plan || null,
+            provider: detail.report_data.provider || null,
+            fallbackUsed: Boolean(detail.report_data.fallback_used)
+          }
+        : null
+      this.isLocked = this.isReportReady
+      this.streamStatus = ''
+      this.errorMsg = ''
+      if (!this.messages.length && this.kpId) {
+        const greeting = await fetchGreeting(this.kpId, sessionId)
+        this.pushMessage('ai', greeting.reply_text)
+      }
+      return detail
+    },
     setKnowledgePoint(kpId, kpName) {
       this.kpId = kpId
       this.kpName = kpName
@@ -119,22 +153,41 @@ export const useChatStore = defineStore('chat', {
       const content = (text || '').trim()
       if (!content || this.isLocked) return
 
-      this.pushMessage('user', content)
+      const previousUserCount = this.messages.filter(item => item.role === 'user').length
+      const userMessage = this.pushMessage('user', content)
+      const pending = this.pushMessage('ai', '')
       this.isLocked = true
+      this.streamStatus = '正在连接讲解服务…'
       this.errorMsg = ''
 
       try {
-        const data = await chatWithAgent(this.sessionId, content, this.kpId)
-        this.handleAgentResponse(data)
+        const data = await streamChatWithAgent(this.sessionId, content, this.kpId, (delta) => {
+          pending.content += delta
+          if (this.streamStatus !== '正在保存本轮讲解与诊断…') {
+            this.streamStatus = '正在输出回复…'
+          }
+        }, (_stage, text) => {
+          this.streamStatus = text
+        })
+        await this.handleAgentResponse(data, pending.id)
         return data
       } catch (e) {
-        this.pushMessage(
-          'system',
-          '网络异常：' + (e.message || '请稍后再试')
-        )
+        // 若服务端已保存而终止事件在网络中丢失，先恢复历史，避免重试产生重复讲解。
+        try {
+          const detail = await getSessionDetail(this.sessionId)
+          const history = detail?.chat_history || []
+          const savedUserCount = history.filter(item => item.role === 'user').length
+          if (savedUserCount > previousUserCount && history.at(-2)?.content === content) {
+            await this.restoreSession(this.sessionId)
+            return { recovered: true }
+          }
+        } catch (_) { /* 保留原始流错误，输入内容仍留在输入框。 */ }
+        this.messages = this.messages.filter(item => item.id !== userMessage.id && item.id !== pending.id)
         this.isLocked = false
-        this.errorMsg = e.message || '请求失败'
+        this.errorMsg = `${e.message || '请求失败'}。输入内容已保留，可重试。`
         return null
+      } finally {
+        this.streamStatus = ''
       }
     },
 
@@ -142,23 +195,31 @@ export const useChatStore = defineStore('chat', {
      * 处理 Agent 响应
      * 第八周：报告生成后，若处于复习模式，自动拉取复习结果对比
      */
-    async handleAgentResponse(data) {
+    async handleAgentResponse(data, pendingId = '') {
       if (!data) {
         this.isLocked = false
         return
       }
 
-      const { next_action, reply_text, card_preview, final_report } = data
+      const { next_action, reply_text, card_preview, final_report, review_plan, provider, fallback_used } = data
 
-      if (reply_text) {
+      const pending = this.messages.find(item => item.id === pendingId)
+      if (reply_text && pending) {
+        pending.content = reply_text
+      } else if (reply_text) {
         this.pushMessage('ai', reply_text)
+      } else if (pending) {
+        this.messages = this.messages.filter(item => item.id !== pendingId)
       }
 
       if (next_action === 'generate_report') {
         this.isReportReady = true
         this.reportData = {
           cardPreview: card_preview || null,
-          finalReport: final_report || null
+          finalReport: final_report || null,
+          reviewPlan: review_plan || null,
+          provider: provider || null,
+          fallbackUsed: Boolean(fallback_used)
         }
         // 复习模式：后端生成报告并完成事务后，前端拉取复习结果对比
         if (this.isReviewMode && this.reviewId) {
@@ -178,12 +239,15 @@ export const useChatStore = defineStore('chat', {
     },
 
     pushMessage(role, content) {
-      this.messages.push({
+      const message = {
         id: uuidv4(),
         role,
         content,
         ts: Date.now()
-      })
+      }
+      // 返回 Pinia 响应式数组中的代理对象。返回局部原始对象会导致
+      // pending.content += delta 虽然执行了，Vue 却直到 done 才刷新气泡。
+      return appendReactiveMessage(this.messages, message)
     },
 
     setError(msg) {
@@ -206,6 +270,7 @@ export const useChatStore = defineStore('chat', {
       this.sessionId = uuidv4()
       this.messages = []
       this.isLocked = false
+      this.streamStatus = ''
       this.isReportReady = false
       this.reportData = null
       this.errorMsg = ''
@@ -236,3 +301,7 @@ export const useChatStore = defineStore('chat', {
     }
   }
 })
+
+if (import.meta.hot) {
+  import.meta.hot.accept(acceptHMRUpdate(useChatStore, import.meta.hot))
+}

@@ -1,5 +1,16 @@
 <script setup>
-// AI 思考中的三圆点气泡
+import { onMounted, onUnmounted, ref } from 'vue'
+
+defineProps({ status: { type: String, default: '正在处理…' } })
+const startedAt = Date.now()
+const elapsedSeconds = ref(0)
+let timer
+onMounted(() => {
+  timer = window.setInterval(() => {
+    elapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000)
+  }, 1000)
+})
+onUnmounted(() => window.clearInterval(timer))
 </script>
 
 <template>
@@ -17,11 +28,12 @@
         <rect x="19" y="10" width="2" height="4" rx="1" fill="#93C5FD" />
       </svg>
     </div>
-    <div class="loading-bubble">
-      <span class="loading-text">AI 小白正在梳理你的讲解逻辑…</span>
+    <div class="loading-bubble" role="status" aria-live="polite">
+      <span class="loading-text">{{ status }}</span>
       <span class="dot" />
       <span class="dot" />
       <span class="dot" />
+      <span v-if="elapsedSeconds >= 3" class="elapsed">{{ elapsedSeconds }} 秒</span>
     </div>
   </div>
 </template>
@@ -62,6 +74,13 @@
 .loading-text {
   font-size: 14px;
   color: #64748B;
+}
+
+.elapsed {
+  color: #94A3B8;
+  font-size: 12px;
+  white-space: nowrap;
+  margin-left: 4px;
 }
 
 .dot {

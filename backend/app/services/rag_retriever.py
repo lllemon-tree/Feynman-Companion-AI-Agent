@@ -1,3 +1,4 @@
+import asyncio
 from functools import lru_cache
 from typing import Protocol
 
@@ -34,13 +35,12 @@ class ChromaRAGRetriever:
         material_id: str,
         top_k: int = 3,
     ) -> list[RetrievedChunk]:
-        from backend.app.services.vector_store import vector_store
+        # BGE 编码和 Chroma 查询都是同步重活，放到工作线程避免卡住其他对话的事件循环。
+        def search_material():
+            from backend.app.services.vector_store import vector_store
+            return vector_store.search(material_id=material_id, query=query, top_k=top_k)
 
-        raw = vector_store.search(
-            material_id=material_id,
-            query=query,
-            top_k=top_k,
-        )
+        raw = await asyncio.to_thread(search_material)
         return [
             RetrievedChunk(
                 chunk_id=item["chunk_id"],

@@ -22,7 +22,8 @@ watch(
       document.body.style.overflow = ''
       window.removeEventListener('keydown', handleEsc)
     }
-  }
+  },
+  { immediate: true }
 )
 
 onBeforeUnmount(() => {

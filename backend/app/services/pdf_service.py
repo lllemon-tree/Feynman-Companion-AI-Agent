@@ -58,10 +58,16 @@ def save_and_process_pdf(
         doc.close()
         raise ValueError("PDF 文件没有可解析页面")
 
-    sample_text = "".join(doc[index].get_text() for index in range(min(3, doc.page_count)))
-    if len(sample_text.strip()) < 10:
+    # Covers can occupy several pages. Do not reject a valid text PDF just because
+    # the first three pages happen to be images or blank.
+    text_chars = 0
+    for page in doc:
+        text_chars += len(page.get_text().strip())
+        if text_chars >= 10:
+            break
+    if text_chars < 10:
         doc.close()
-        raise ValueError("检测到扫描版 PDF，无法提取文本，请上传电子原版。")
+        raise ValueError("未检测到可提取的正文文字；扫描版 PDF 暂不支持，请上传带文字层的 PDF。")
 
     toc = doc.get_toc()
     level_one_toc = [item for item in toc if item[0] == 1]

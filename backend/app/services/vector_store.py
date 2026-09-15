@@ -1,4 +1,5 @@
 import os
+import threading
 from typing import List, Dict, Any
 import chromadb
 from chromadb.config import Settings
@@ -22,6 +23,7 @@ class BGEEmbeddingFunction(EmbeddingFunction):
     def __init__(self, model_name: str = "BAAI/bge-large-zh-v1.5"):
         self.model_name = model_name
         self._model = None
+        self._encode_lock = threading.Lock()
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -31,9 +33,11 @@ class BGEEmbeddingFunction(EmbeddingFunction):
         """
         # normalize_embeddings=True 表示输出标准化的向量，便于后续计算余弦相似度
         # 首次真正向量化时才加载模型，避免普通 API 启动和单元测试被阻塞。
-        if self._model is None:
-            self._model = SentenceTransformer(self.model_name)
-        embeddings = self._model.encode(input, normalize_embeddings=True).tolist()
+        # 检索在工作线程运行后，用锁避免并发请求重复加载大型模型。
+        with self._encode_lock:
+            if self._model is None:
+                self._model = SentenceTransformer(self.model_name)
+            embeddings = self._model.encode(input, normalize_embeddings=True).tolist()
         return embeddings
 
 
