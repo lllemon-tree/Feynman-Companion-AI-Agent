@@ -4,6 +4,7 @@ from backend.app.core.database import engine
 # 导入底层数据库模型
 from backend.app.models.knowledge import Material, Chapter, KP
 from backend.app.models.auth import GUEST_USER_ID
+from backend.app.models.diagnostic_report import DiagnosticReport
 # 导入返回给前端的数据外壳
 from backend.app.models.knowledge import (
     MaterialStatusData, 
@@ -70,6 +71,11 @@ def get_material_tree_from_db(session: Session, subject: str, user_id: str = GUE
         .order_by(Material.uploaded_at.desc())
     )
     materials = session.exec(statement).all()
+    learned_kp_ids = set(
+        session.exec(
+            select(DiagnosticReport.kp_id).where(DiagnosticReport.user_id == user_id)
+        ).all()
+    )
     
     tree_list = []
     for mat in materials:
@@ -92,6 +98,7 @@ def get_material_tree_from_db(session: Session, subject: str, user_id: str = GUE
                     page_start=kp.page_start,
                     page_end=kp.page_end,
                     status=kp.status,
+                    learning_status="learned" if kp.id in learned_kp_ids else "unlearned",
                 ) for kp in kps
             ]
             

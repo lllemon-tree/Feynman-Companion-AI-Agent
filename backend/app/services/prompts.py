@@ -101,3 +101,70 @@ RUBRIC_GENERATION_SYSTEM_PROMPT = """
 
 def build_rubric_user_prompt(text: str, kp_name: str) -> str:
     return f"知识点：{kp_name}\n\n参考原文：\n{text}\n\n请基于原文生成评价标准。"
+
+
+KNOWLEDGE_CARD_SYSTEM_PROMPT = """
+你是费曼伴学的教材知识卡片编辑器。你要生成“最小充分知识输入”，让学习者读完后能说清是什么、为什么、如何工作和一个最小例子。
+
+【资料边界】
+1. 教材原文和评价基准决定知识点的核心事实、术语、条件和结论。不得改写成相反含义。
+2. 教材内容可以用更通俗的语言重组，这类区块使用 source_type=textbook_rewrite，并填写实际依据的 chunk_id。
+3. 教材缺少例子、类比或前置说明时，可以有限补充，但必须使用 source_type=model_supplement，source_chunk_ids=[]，required_for_evaluation=false。
+4. 只有可从教材或评价基准直接确认的核心内容，才能 required_for_evaluation=true。模型补充绝对不能成为用户必答项。
+5. 不得伪造页码、教材原话、chunk_id。只能使用输入中真实给出的 chunk_id。
+6. 如果教材严重不足，coverage_level=limited，并在 coverage_notice 中坦诚说明，不强行补成一张看似完整的标准答案。
+
+【卡片结构】
+尽量包含以下区块：one_sentence（一句话理解）、why_it_matters（为什么需要）、core_points（核心内容）、minimum_example（最小例子）、misconceptions（容易混淆）、explanation_prompts（讲解提示）。
+不要堆砌长原文。核心内容与误区优先放入 bullets，其他区块优先放入 content。
+
+只返回 JSON：
+{
+  "coverage_level": "sufficient | partial | limited",
+  "coverage_notice": "教材覆盖情况的简短说明",
+  "estimated_minutes": 5,
+  "sections": [
+    {
+      "key": "one_sentence",
+      "title": "一句话理解",
+      "content": "...",
+      "bullets": [],
+      "source_type": "textbook | textbook_rewrite | model_supplement",
+      "source_chunk_ids": ["真实chunk_id"],
+      "required_for_evaluation": true
+    }
+  ]
+}
+""".strip()
+
+
+def build_knowledge_card_user_prompt(
+    kp_name: str,
+    summary: str,
+    rubric: Dict[str, Any],
+    source_chunks: Sequence[RetrievedChunk],
+) -> str:
+    selected_chunks = []
+    total_chars = 0
+    for chunk in source_chunks:
+        if len(selected_chunks) >= 12 or total_chars >= 12000:
+            break
+        remaining = max(0, 12000 - total_chars)
+        text = chunk.text[:remaining]
+        selected_chunks.append(
+            f"[chunk_id={chunk.chunk_id} / 第{chunk.page_no}页]\n{text}"
+        )
+        total_chars += len(text)
+    source_text = "\n\n".join(selected_chunks) or "（当前没有可用教材切片）"
+    return f"""
+知识点：{kp_name}
+现有摘要：{summary}
+
+评价基准（只用于确认核心范围）：
+{json.dumps(rubric, ensure_ascii=False)}
+
+教材切片：
+{source_text}
+
+请生成结构化知识卡片。
+""".strip()

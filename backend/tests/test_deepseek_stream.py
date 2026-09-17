@@ -8,9 +8,50 @@ import httpx
 
 from backend.app.core.config import Settings
 from backend.app.services.deepseek_client import DeepSeekClient
+from backend.app.services.kp_provider import KnowledgePoint
 
 
 class DeepSeekStreamTest(unittest.IsolatedAsyncioTestCase):
+    async def test_knowledge_card_uses_flash_model_without_thinking(self):
+        captured = {}
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            captured.update(json.loads(request.content))
+            return httpx.Response(200, json={
+                "choices": [{"message": {"content": json.dumps({
+                    "coverage_level": "partial",
+                    "coverage_notice": "教材部分覆盖",
+                    "estimated_minutes": 3,
+                    "sections": [],
+                })}}],
+            })
+
+        transport = httpx.MockTransport(respond)
+        original_client = httpx.AsyncClient
+        settings = Settings(
+            llm_provider="deepseek",
+            deepseek_api_key="unit-test-only",
+            deepseek_model="deepseek-v4-pro",
+            knowledge_card_model="deepseek-v4-flash",
+        )
+        point = KnowledgePoint(
+            kp_id="kp-card",
+            name="封装",
+            summary="隐藏实现细节",
+            rubric={},
+            material_id="mat-card",
+            chapter_id="ch-card",
+        )
+        with patch(
+            "backend.app.services.deepseek_client.httpx.AsyncClient",
+            side_effect=lambda **kwargs: original_client(transport=transport, **kwargs),
+        ):
+            await DeepSeekClient(settings).generate_knowledge_card(point)
+
+        self.assertEqual(captured["model"], "deepseek-v4-flash")
+        self.assertEqual(captured["thinking"], {"type": "disabled"})
+        self.assertEqual(captured["response_format"], {"type": "json_object"})
+
     async def test_textbook_json_stream_exposes_only_reply_text(self):
         captured = {}
         deltas = []

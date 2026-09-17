@@ -5,9 +5,13 @@ const props = defineProps({
   cardPreview: { type: Object, required: true },
   finalReport: { type: Object, default: null },
   provider: { type: String, default: null },
-  fallbackUsed: { type: Boolean, default: false }
+  fallbackUsed: { type: Boolean, default: false },
+  reviewListAdded: { type: Boolean, default: false },
+  reviewListSource: { type: String, default: null },
+  reviewAdding: { type: Boolean, default: false },
+  showReviewAction: { type: Boolean, default: true }
 })
-defineEmits(['click'])
+defineEmits(['click', 'add-review'])
 
 const dimensions = computed(() => props.finalReport?.dimensions || [])
 const totalScore = computed(() => dimensions.value.length
@@ -19,7 +23,7 @@ const isLimited = computed(() => props.fallbackUsed || props.provider === 'mock'
 </script>
 
 <template>
-  <button type="button" class="report-card" @click="$emit('click')">
+  <article class="report-card" role="button" tabindex="0" @click="$emit('click')" @keydown.enter="$emit('click')">
     <span class="eyebrow"><span class="status-dot"></span> 本轮讲解完成 · {{ isLimited ? '降级诊断' : '诊断已生成' }}</span>
     <div class="report-main">
       <div class="score-box">
@@ -35,8 +39,20 @@ const isLimited = computed(() => props.fallbackUsed || props.provider === 'mock'
       </div>
       <span class="report-arrow" aria-hidden="true">→</span>
     </div>
-    <span class="report-hint">{{ isLimited ? '本轮未使用正式模型评估，分数仅供流程演示，请勿当作真实掌握度。' : '打开报告，逐项查看讲对的内容、原话证据、待补强点与复习路径' }}</span>
-  </button>
+    <div class="report-footer">
+      <span class="report-hint">{{ isLimited ? '本轮未使用正式模型评估，分数仅供流程演示，请勿当作真实掌握度。' : '打开报告，逐项查看讲对的内容、原话证据、待补强点与复习路径' }}</span>
+      <button
+        v-if="showReviewAction"
+        type="button"
+        class="review-button"
+        :class="{ 'review-button--added': reviewListAdded }"
+        :disabled="reviewListAdded || reviewAdding"
+        @click.stop="$emit('add-review')"
+      >
+        {{ reviewListAdded ? (reviewListSource === 'automatic' ? '低于6分，已自动加入复习列表' : '已加入复习列表') : (reviewAdding ? '正在添加…' : '添加到复习列表') }}
+      </button>
+    </div>
+  </article>
 </template>
 
 <style scoped>
@@ -56,7 +72,11 @@ const isLimited = computed(() => props.fallbackUsed || props.provider === 'mock'
 .dimension-scores { display: flex; flex-wrap: wrap; gap: 7px 12px; color: #7486a0; font-size: 11px; }
 .dimension-scores b { color: #3265d5; font-weight: 750; }
 .report-arrow { display: grid; place-items: center; flex: none; width: 27px; height: 27px; border-radius: 50%; background: #e7efff; color: #3264d6; font-size: 19px; }
-.report-hint { display: block; padding-top: 10px; border-top: 1px solid #e6edf7; color: #8b9aaf; font-size: 11px; }
+.report-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 10px; border-top: 1px solid #e6edf7; }
+.report-hint { display: block; min-width: 0; color: #8b9aaf; font-size: 11px; }
+.review-button { flex: none; padding: 7px 11px; border-radius: 8px; background: #eaf1ff; color: #285fcf; font-size: 11px; font-weight: 650; cursor: pointer; }
+.review-button:hover:not(:disabled) { background: #dce8ff; }
+.review-button--added { background: #edf8f3; color: #27815f; cursor: default; }
 @media (max-width: 680px) {
   .report-card { width: 100%; margin-left: 0; padding: 16px; }
   .report-main { gap: 13px; }
@@ -64,5 +84,7 @@ const isLimited = computed(() => props.fallbackUsed || props.provider === 'mock'
   .score-box strong { font-size: 28px; }
   .score-box small { display: none; }
   .report-arrow { display: none; }
+  .report-footer { align-items: flex-start; flex-direction: column; }
+  .review-button { width: 100%; }
 }
 </style>

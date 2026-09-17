@@ -3,9 +3,10 @@ import { ref, onMounted, computed, onActivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
-import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview } from '@/api/feynman'
+import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview, getStudyReviewList, addReportToReviewList } from '@/api/feynman'
 import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
 import ReportDrawer from '@/components/DetailedReportDrawer.vue'
+import FavoriteCardsPanel from '@/components/FavoriteCardsPanel.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -18,7 +19,8 @@ const pageTitle = computed(() => ({
   gaps: '复习计划',
   sessions: '教材讲解记录',
   reports: '学习报告',
-  materials: '我的教材'
+  materials: '我的教材',
+  favorites: '知识收藏'
 }[activeTab.value] || '个人主页'))
 const loading = ref(false)
 
@@ -36,6 +38,7 @@ const expandedKps = ref(new Set())
 const reviewDueGaps = ref([])
 const showReviewDue = ref(false)
 const loadingReviewDue = ref(false)
+const studyReviewItems = ref([])
 
 // 复习入口加载态：避免重复点击
 const reviewStarting = ref(false)
@@ -206,6 +209,7 @@ const reports = ref([])
 const showReportDetail = ref(false)
 const selectedReport = ref(null)
 const reportDetailLoading = ref(false)
+const reportReviewAdding = ref(false)
 
 // 我的教材
 const materials = ref([])
@@ -249,18 +253,28 @@ async function loadGaps() {
   if (!isLoggedIn.value) return
   loadingGaps.value = true
   try {
-    const [gapsData, statsData] = await Promise.all([
+    const [gapsData, statsData, reviewListData] = await Promise.all([
       getGaps(activeGapStatus.value),
-      getGapsStats()
+      getGapsStats(),
+      getStudyReviewList()
     ])
     gaps.value = gapsData.items || []
     gapStats.value = statsData
+    studyReviewItems.value = reviewListData.items || []
   } catch (e) {
     gaps.value = []
     gapStats.value = {}
+    studyReviewItems.value = []
   } finally {
     loadingGaps.value = false
   }
+}
+
+function restartStudyReview(item) {
+  chatStore.clearReviewContext()
+  chatStore.clearKnowledgeContext()
+  chatStore.setKnowledgePoint(item.kp_id, item.kp_name)
+  router.push('/study')
 }
 
 async function loadReviewDueGaps(openList = true) {
@@ -371,6 +385,21 @@ async function viewReportDetail(report) {
   }
 }
 
+async function addSelectedReportToReviewList() {
+  if (!selectedReport.value?.report_id || reportReviewAdding.value) return
+  reportReviewAdding.value = true
+  try {
+    const item = await addReportToReviewList(selectedReport.value.report_id)
+    selectedReport.value.review_list_added = true
+    selectedReport.value.review_list_source = item.source || 'manual'
+    await loadGaps()
+  } catch (error) {
+    showToast(error.message || '加入复习列表失败')
+  } finally {
+    reportReviewAdding.value = false
+  }
+}
+
 async function loadMaterials() {
   loadingMaterials.value = true
   try {
@@ -417,7 +446,7 @@ function handleTabChange(key) {
 }
 
 watch(() => route.query.tab, tab => {
-  if (['profile', 'gaps', 'sessions', 'reports', 'materials'].includes(tab) && tab !== activeTab.value) {
+  if (['profile', 'gaps', 'sessions', 'reports', 'materials', 'favorites'].includes(tab) && tab !== activeTab.value) {
     handleTabChange(tab)
   }
 })
@@ -460,7 +489,7 @@ onMounted(() => {
     activeTab.value = 'gaps'
     // 清除 query，避免刷新后重复触发
     router.replace({ path: '/profile' })
-  } else if (['profile', 'gaps', 'sessions', 'reports', 'materials'].includes(route.query.tab)) {
+  } else if (['profile', 'gaps', 'sessions', 'reports', 'materials', 'favorites'].includes(route.query.tab)) {
     activeTab.value = route.query.tab
   }
   // 加载学情统计数据
@@ -521,9 +550,14 @@ onActivated(() => {
         <button v-if="!isLoggedIn" class="login-prompt-btn" @click="router.push('/login')">
           去登录
         </button>
-        <button v-else class="record-link" type="button" @click="router.push('/profile?tab=sessions')">
-          查看教材讲解记录
-        </button>
+        <div v-else class="profile-quick-actions">
+          <button class="record-link record-link--favorite" type="button" @click="router.push('/profile?tab=favorites')">
+            ★ 知识收藏
+          </button>
+          <button class="record-link" type="button" @click="router.push('/profile?tab=sessions')">
+            查看教材讲解记录
+          </button>
+        </div>
       </div>
       <!-- 学情档案 Tab -->
       <div v-if="activeTab === 'profile'" class="tab-content">
@@ -688,8 +722,37 @@ onActivated(() => {
         </div>
       </div>
 
+      <div v-if="activeTab === 'favorites'" class="tab-content">
+        <FavoriteCardsPanel v-if="isLoggedIn" />
+        <div v-else class="empty-state">
+          <div class="empty-icon">☆</div>
+          <p>登录后建立你自己的知识收藏夹</p>
+          <button class="upload-btn" @click="router.push('/login')">去登录</button>
+        </div>
+      </div>
+
       <!-- 知识漏洞 Tab -->
       <div v-if="activeTab === 'gaps'" class="tab-content">
+        <section v-if="studyReviewItems.length" class="study-review-section">
+          <div class="study-review-heading">
+            <div>
+              <h3>知识点复习列表</h3>
+              <p>包含低于6分自动加入和你主动保留的知识点。</p>
+            </div>
+            <span>{{ studyReviewItems.length }} 项</span>
+          </div>
+          <div class="study-review-grid">
+            <article v-for="item in studyReviewItems" :key="item.review_item_id" class="study-review-card">
+              <div>
+                <span class="review-source">{{ item.source === 'automatic' ? '低分自动加入' : '手动添加' }}</span>
+                <h4>{{ item.kp_name }}</h4>
+                <p>{{ item.material_name || '当前教材' }}<span v-if="item.average_score !== null"> · 最近 {{ item.average_score }} 分</span></p>
+              </div>
+              <button type="button" @click="restartStudyReview(item)">重新学习</button>
+            </article>
+          </div>
+        </section>
+
         <!-- 今日待复习按钮 -->
         <button v-if="!showReviewDue" class="review-due-btn" @click="loadReviewDueGaps">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -1151,7 +1214,12 @@ onActivated(() => {
       :open="showReportDetail"
       :report="selectedReport"
       :loading="reportDetailLoading"
+      show-review-action
+      :review-list-added="selectedReport?.review_list_added"
+      :review-list-source="selectedReport?.review_list_source"
+      :review-adding="reportReviewAdding"
       @close="showReportDetail = false"
+      @add-review="addSelectedReportToReviewList"
     />
 
     <!-- 会话详情弹窗 -->
@@ -1423,6 +1491,9 @@ export default {
   white-space: nowrap;
 }
 .record-link:hover { background: #eaf1ff; }
+.profile-quick-actions { display: flex; align-items: center; gap: 8px; }
+.record-link--favorite { color: #a35f00; border-color: #edd19b; background: #fff9ec; }
+.record-link--favorite:hover { background: #fff2d5; }
 
 .user-name {
   margin: 0 0 4px;
@@ -1620,6 +1691,20 @@ export default {
   font-size: 11px;
   color: #6B7280;
 }
+
+/* 知识点级复习列表 */
+.study-review-section { margin-bottom: 18px; padding: 18px; border: 1px solid #e4eaf4; border-radius: 14px; background: #fff; }
+.study-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
+.study-review-heading h3 { margin: 0 0 5px; color: #24354f; font-size: 15px; }
+.study-review-heading p { margin: 0; color: #8795a9; font-size: 11px; }
+.study-review-heading > span { padding: 4px 8px; border-radius: 7px; background: #edf3ff; color: #3568cf; font-size: 11px; font-weight: 650; }
+.study-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.study-review-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid #e7ecf4; border-radius: 11px; background: #fafcff; }
+.study-review-card h4 { margin: 5px 0 4px; color: #293b57; font-size: 13px; }
+.study-review-card p { margin: 0; color: #8996a9; font-size: 10px; }
+.review-source { color: #6b7e9c; font-size: 10px; }
+.study-review-card button { flex: none; padding: 7px 10px; border-radius: 8px; background: #eaf1ff; color: #2c61cb; font-size: 11px; font-weight: 650; }
+@media (max-width: 760px) { .study-review-grid { grid-template-columns: 1fr; } }
 
 /* 今日待复习按钮和列表 */
 .review-due-btn {
@@ -2736,6 +2821,7 @@ export default {
 
 @media (max-width: 767px) {
   .user-card { flex-wrap: wrap; padding: 16px; }
+  .profile-quick-actions { width: 100%; flex-direction: column; align-items: stretch; }
   .record-link { width: 100%; }
 }
 

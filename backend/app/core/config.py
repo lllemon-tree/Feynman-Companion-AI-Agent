@@ -29,6 +29,7 @@ class Settings(BaseModel):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-flash"
+    knowledge_card_model: str = "deepseek-v4-flash"
     free_chat_models: tuple[str, ...] = ("deepseek-flash", "deepseek-v4-pro")
     request_timeout_seconds: float = 30.0
     max_follow_ups: int = 3
@@ -73,6 +74,7 @@ def get_settings() -> Settings:
         deepseek_api_key=pick("DEEPSEEK_API_KEY", ""),
         deepseek_base_url=pick("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/"),
         deepseek_model=pick("DEEPSEEK_MODEL", "deepseek-flash"),
+        knowledge_card_model=pick("KNOWLEDGE_CARD_MODEL", "deepseek-v4-flash"),
         free_chat_models=tuple(dict.fromkeys(
             model.strip() for model in pick(
                 "DEEPSEEK_CHAT_MODELS", "deepseek-flash,deepseek-v4-pro"

@@ -18,8 +18,26 @@ from backend.app.services.kp_service import (
     delete_kp_in_db, trigger_regenerate_in_db
 )
 from backend.app.services.workflow_service import regenerate_kp_workflow
+from backend.app.models.learning import KnowledgeCardResponse
+from backend.app.services.knowledge_card_service import (
+    enhance_knowledge_card,
+    get_or_create_knowledge_card,
+)
 
 router = APIRouter(prefix="/kp", tags=["Knowledge Point"])
+
+
+@router.get("/{kp_id}/card", response_model=KnowledgeCardResponse)
+async def get_knowledge_card(
+    kp_id: str,
+    background_tasks: BackgroundTasks,
+    actor: CurrentActor = Depends(get_current_actor),
+    session: Session = Depends(get_session),
+):
+    data = await get_or_create_knowledge_card(session, kp_id, actor.user_id)
+    if data.generation_status == "generating":
+        background_tasks.add_task(enhance_knowledge_card, kp_id, actor.user_id)
+    return KnowledgeCardResponse(code=200, msg="success", data=data)
 
 @router.get("/{kp_id}", response_model=KPDetailResponse)
 async def get_kp_detail(

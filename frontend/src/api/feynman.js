@@ -106,10 +106,10 @@ export async function chatWithAgent(sessionId, userInput, kpId) {
   return data?.data
 }
 
-export async function streamChatWithAgent(sessionId, userInput, kpId, onDelta, onStatus) {
+export async function streamChatWithAgent(sessionId, userInput, kpId, onDelta, onStatus, finishRequested = false) {
   if (USE_FEYNMAN_MOCK) {
     onStatus?.('generating', '正在生成讲解…')
-    const result = await mockChat(sessionId, userInput)
+    const result = finishRequested ? MOCK_GENERATE_REPORT.data : await mockChat(sessionId, userInput)
     if (result?.reply_text) onDelta?.(result.reply_text)
     return result
   }
@@ -120,7 +120,12 @@ export async function streamChatWithAgent(sessionId, userInput, kpId, onDelta, o
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {})
     },
-    body: JSON.stringify({ session_id: sessionId, kp_id: kpId, user_input: userInput })
+    body: JSON.stringify({
+      session_id: sessionId,
+      kp_id: kpId,
+      user_input: userInput,
+      finish_requested: finishRequested
+    })
   })
   return readNdjsonResponse(response, token, onDelta, onStatus)
 }
@@ -263,6 +268,95 @@ export async function getKpDetail(kpId) {
   }
   const data = await http.get(`/kp/${kpId}`)
   return data?.data
+}
+
+export async function getKnowledgeCard(kpId) {
+  if (USE_MATERIAL_MOCK) {
+    const detail = MOCK_KP_DETAIL.data
+    return {
+      card_id: `card-${kpId}`,
+      kp_id: kpId,
+      name: detail.name,
+      summary: detail.summary,
+      learning_status: 'unlearned',
+      version: 1,
+      generation_status: 'ready',
+      coverage_level: 'partial',
+      coverage_notice: '演示卡片以教材摘要和评价基准组织。',
+      estimated_minutes: 5,
+      sections: [
+        { key: 'one_sentence', title: '一句话理解', content: detail.summary, bullets: [], source_type: 'textbook_rewrite', required_for_evaluation: true },
+        { key: 'core_points', title: '核心内容', content: '', bullets: ['理解基本概念', '说清核心过程', '用一个例子验证'], source_type: 'textbook_rewrite', required_for_evaluation: true },
+        { key: 'explanation_prompts', title: '讲解提示', content: '', bullets: ['它是什么？', '它为什么成立？'], source_type: 'model_supplement', required_for_evaluation: false }
+      ],
+      sources: detail.source_chunks || [],
+      updated_at: new Date().toISOString()
+    }
+  }
+  const data = await http.get(`/kp/${kpId}/card`)
+  return data?.data
+}
+
+export async function favoriteKnowledgeCard(cardId, options = {}) {
+  if (USE_MATERIAL_MOCK) {
+    return {
+      favorite_id: `favorite-${cardId}`,
+      card_id: cardId,
+      collection_ids: options.collectionIds || [],
+      note: options.note || '',
+      tags: options.tags || []
+    }
+  }
+  const data = await http.post('/card-favorites', {
+    card_id: cardId,
+    collection_ids: options.collectionIds || [],
+    note: options.note || '',
+    tags: options.tags || []
+  })
+  return data?.data
+}
+
+export async function updateCardFavorite(favoriteId, changes) {
+  const data = await http.patch(`/card-favorites/${favoriteId}`, changes)
+  return data?.data
+}
+
+export async function removeCardFavorite(favoriteId) {
+  if (USE_MATERIAL_MOCK) return { is_favorited: false, favorite_id: null }
+  const data = await http.delete(`/card-favorites/${favoriteId}`)
+  return data?.data
+}
+
+export async function getCardFavorites(filters = {}) {
+  if (USE_MATERIAL_MOCK) return { items: [], total: 0, available_tags: [] }
+  const params = {
+    q: filters.query || '',
+    sort: filters.sort || 'recent'
+  }
+  if (filters.collectionId) params.collection_id = filters.collectionId
+  if (filters.tag) params.tag = filters.tag
+  const data = await http.get('/card-favorites', { params })
+  return data?.data
+}
+
+export async function getCardFavoriteCollections() {
+  if (USE_MATERIAL_MOCK) return { items: [], total: 0 }
+  const data = await http.get('/card-favorites/collections')
+  return data?.data
+}
+
+export async function createCardFavoriteCollection(payload) {
+  const data = await http.post('/card-favorites/collections', payload)
+  return data?.data
+}
+
+export async function updateCardFavoriteCollection(collectionId, payload) {
+  const data = await http.patch(`/card-favorites/collections/${collectionId}`, payload)
+  return data?.data
+}
+
+export async function deleteCardFavoriteCollection(collectionId) {
+  await http.delete(`/card-favorites/collections/${collectionId}`)
 }
 
 export async function createKp(chapterId, name, pageStart, pageEnd) {
@@ -705,6 +799,25 @@ export async function getReportDetail(reportId) {
     return MOCK_REPORT_DETAIL.data
   }
   const data = await http.get(`/reports/${reportId}`)
+  return data?.data
+}
+
+export async function addReportToReviewList(reportId) {
+  if (USE_FEYNMAN_MOCK) {
+    return {
+      review_item_id: `review-item-${reportId}`,
+      report_id: reportId,
+      source: 'manual',
+      status: 'pending'
+    }
+  }
+  const data = await http.post(`/study-review/reports/${reportId}`)
+  return data?.data
+}
+
+export async function getStudyReviewList() {
+  if (USE_FEYNMAN_MOCK) return { items: [], total: 0 }
+  const data = await http.get('/study-review')
   return data?.data
 }
 

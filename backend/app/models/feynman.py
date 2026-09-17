@@ -62,7 +62,14 @@ class NextAction(str, Enum):
 class FeynmanChatRequest(BaseModel):
     session_id: str = Field(..., min_length=1)
     kp_id: Optional[str] = Field(default=None, min_length=1)
-    user_input: str = Field(..., min_length=1, max_length=500)
+    user_input: str = Field(default="", max_length=500)
+    finish_requested: bool = False
+
+    @model_validator(mode="after")
+    def require_input_or_finish(self):
+        if not self.finish_requested and not self.user_input.strip():
+            raise ValueError("user_input cannot be empty")
+        return self
 
 
 class ResetSessionRequest(BaseModel):
@@ -122,6 +129,9 @@ class FeynmanChatData(BaseModel):
     review_plan: Optional[ReviewPlan] = None
     provider: Optional[str] = None
     fallback_used: bool = False
+    report_id: Optional[str] = None
+    review_list_added: bool = False
+    review_list_source: Optional[str] = None
 
     @model_validator(mode="after")
     def use_dimension_scores_as_total(self):

@@ -70,6 +70,8 @@ class ReportDetailData(BaseModel):
     overall_comment: Optional[str] = None
     gaps_identified: int = PydanticField(ge=0, le=4)
     review_plan: Optional[ReviewPlan] = None  # 历史报告详情回看复习建议
+    review_list_added: bool = False
+    review_list_source: Optional[str] = None
     created_at: datetime
 
 
