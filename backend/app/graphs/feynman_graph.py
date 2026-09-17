@@ -169,6 +169,12 @@ class FeynmanGraph:
 
         if knowledge_point is None:
             route: RouteName = "kp_missing"
+        elif state["request"].finish_requested:
+            has_explanation = any(
+                message.role == "user" and message.content.strip()
+                for message in session.messages
+            )
+            route = "report" if has_explanation else "ineffective"
         elif _is_off_topic(user_input, knowledge_point):
             route = "off_topic"
         elif _is_ineffective_answer(user_input):
@@ -238,8 +244,15 @@ class FeynmanGraph:
 
         rag_chunks: list[RetrievedChunk] = []
         try:
+            latest_user_input = request.user_input.strip() or next(
+                (
+                    message.content for message in reversed(state["session"].messages)
+                    if message.role == "user" and message.content.strip()
+                ),
+                knowledge_point.name,
+            )
             raw_chunks = await self._rag_retriever.retrieve(
-                query=request.user_input.strip(),
+                query=latest_user_input,
                 material_id=knowledge_point.material_id,
                 top_k=3,
             )
@@ -353,6 +366,8 @@ class FeynmanGraph:
                 **extra_kwargs,
             )
             response = _normalize_contract(response)
+            if response.next_action != NextAction.GENERATE_REPORT:
+                raise ValueError("report route must return generate_report")
             return {
                 "response": response,
                 "provider": self._primary_provider_name,
@@ -372,6 +387,8 @@ class FeynmanGraph:
                 review_context=review_context,
             )
             response = _normalize_contract(response)
+            if response.next_action != NextAction.GENERATE_REPORT:
+                raise ValueError("fallback report route must return generate_report")
             return {"response": response, "provider": "mock", "fallback_used": True}
 
     @staticmethod
@@ -429,7 +446,8 @@ class FeynmanGraph:
 def _append_turn(session: SessionState, user_input: str, assistant_reply: str) -> None:
     from backend.app.models.feynman import ChatMessage
 
-    session.messages.append(ChatMessage(role="user", content=user_input))
+    if user_input:
+        session.messages.append(ChatMessage(role="user", content=user_input))
     session.messages.append(ChatMessage(role="assistant", content=assistant_reply))
 
 

@@ -19,6 +19,8 @@ from backend.app.api.user_profile import router as user_profile_router
 from backend.app.api.user_stats import router as user_stats_router
 from backend.app.api.review import router as review_router
 from backend.app.api.conversations import router as conversation_router
+from backend.app.api.study_review import router as study_review_router
+from backend.app.api.card_favorites import router as card_favorites_router
 
 # 建表引擎导入
 from backend.app.core.database import create_db_and_tables
@@ -79,3 +81,5 @@ app.include_router(user_stats_router, prefix="/api/v1")
 app.include_router(knowledge_gap_router, prefix="/api/v1")
 app.include_router(review_router, prefix="/api/v1")
 app.include_router(conversation_router, prefix="/api/v1")
+app.include_router(study_review_router, prefix="/api/v1")
+app.include_router(card_favorites_router, prefix="/api/v1")

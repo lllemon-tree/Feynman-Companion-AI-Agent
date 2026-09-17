@@ -89,12 +89,13 @@ class FeynmanService:
         on_status: Optional[Callable[[str, str], None]] = None,
     ) -> FeynmanChatData:
         print(f"📝 user_input: {request.user_input.strip()[:120]}")
-        if not request.user_input.strip():
+        if not request.user_input.strip() and not request.finish_requested:
             raise ValueError("user_input cannot be empty")
 
         session = self._store.get_or_create(request.session_id, user_id)
         if session.ended and session.final_response is not None:
-            self._finalize_report_safely(session, session.final_response)
+            report = self._finalize_report_safely(session, session.final_response)
+            self._attach_report_metadata(session.final_response, report)
             return session.final_response
         # Graph 的 load_context 节点统一加载画像，避免在两层重复查库。
         response = await self._graph.run(
@@ -107,7 +108,11 @@ class FeynmanService:
         if on_status:
             on_status("saving", "正在保存本轮讲解与诊断…")
         self._store.save(session)
-        self._finalize_report_safely(session, response)
+        report = self._finalize_report_safely(session, response)
+        self._attach_report_metadata(response, report)
+        if report is not None:
+            session.final_response = response
+            self._store.save(session)
         return response
 
     def _keep_known_related_knowledge_points(
@@ -129,9 +134,9 @@ class FeynmanService:
         self,
         session: SessionState,
         response: FeynmanChatData,
-    ) -> None:
+    ):
         try:
-            self._report_finalizer.finalize(session, response)
+            return self._report_finalizer.finalize(session, response)
         except Exception:
             logger.exception(
                 "diagnostic report persistence failed for session %s",
@@ -142,6 +147,17 @@ class FeynmanService:
                 and self._report_finalizer.is_review_session(session)
             ):
                 raise ReviewPersistenceError("复习结果暂未保存，请重试")
+        return None
+
+    def _attach_report_metadata(self, response, report) -> None:
+        if report is None:
+            return
+        response.report_id = report.id
+        metadata_reader = getattr(self._report_finalizer, "review_list_metadata", None)
+        if callable(metadata_reader):
+            added, source = metadata_reader(report)
+            response.review_list_added = added
+            response.review_list_source = source
 
     def greeting(self, kp_id: Optional[str] = None, session_id: Optional[str] = None, user_id: str = GUEST_USER_ID) -> GreetingData:
         knowledge_point = self._kp_provider.get(kp_id or DEFAULT_KP_ID)

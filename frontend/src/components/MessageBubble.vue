@@ -1,4 +1,6 @@
 <script setup>
+import MarkdownContent from '@/components/MarkdownContent.vue'
+
 defineProps({
   role: {
     type: String,
@@ -36,7 +38,10 @@ defineProps({
     </div>
 
     <div class="bubble" :class="[`bubble--${role}`]">
-      <div class="bubble__content">{{ content }}</div>
+      <div v-if="role === 'ai'" class="bubble__content">
+        <MarkdownContent :content="content" />
+      </div>
+      <div v-else class="bubble__content">{{ content }}</div>
     </div>
 
     <div class="bubble-avatar bubble-avatar--user" v-if="role === 'user'">
@@ -116,35 +121,5 @@ defineProps({
 .bubble__content {
   font-size: 15px;
   line-height: 1.6;
-}
-
-.bubble__content :deep(p) {
-  margin: 0 0 8px 0;
-}
-
-.bubble__content :deep(p:last-child) {
-  margin-bottom: 0;
-}
-
-.bubble__content :deep(strong) {
-  font-weight: 600;
-}
-
-.bubble__content :deep(em) {
-  font-style: italic;
-}
-
-.bubble__content :deep(ul),
-.bubble__content :deep(ol) {
-  margin: 8px 0;
-  padding-left: 20px;
-}
-
-.bubble__content :deep(li) {
-  margin-bottom: 4px;
-}
-
-.bubble__content :deep(li:last-child) {
-  margin-bottom: 0;
 }
 </style>

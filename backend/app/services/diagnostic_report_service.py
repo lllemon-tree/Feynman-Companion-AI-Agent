@@ -33,9 +33,11 @@ from backend.app.models.feynman import (
     ReviewPlan,
 )
 from backend.app.models.knowledge import Material
+from backend.app.models.learning import KnowledgeReviewItem
 from backend.app.models.review_attempt import ReviewAttempt
 from backend.app.services.review_rules import is_mastered, next_review_at, severity_for_score
 from backend.app.services.review_service import finalize_review
+from backend.app.services.review_list_service import maybe_auto_add_report
 from backend.app.services.session_store import SessionState
 
 
@@ -210,19 +212,20 @@ class DiagnosticReportFinalizer:
             material_name=material_name,
         )
         if self.is_review_session(session_state):
-            return finalize_review(
+            report = finalize_review(
                 self._engine,
                 session_state,
                 response,
                 material_name,
             )
+            return self._auto_enroll(report)
 
         with Session(self._engine) as db:
             existing = db.exec(select(DiagnosticReport).where(
                 DiagnosticReport.session_id == context.session_id
             )).first()
             if existing is not None:
-                return existing
+                return self._auto_enroll(existing)
         try:
             gaps_identified = self._gap_writer.sync(
                 self._engine,
@@ -236,11 +239,31 @@ class DiagnosticReportFinalizer:
                 session_state.session_id,
             )
 
-        return self._save_report(
+        report = self._save_report(
             context=context,
             response=response,
             gaps_identified=gaps_identified,
         )
+        return self._auto_enroll(report)
+
+    def _auto_enroll(
+        self, report: Optional[DiagnosticReport]
+    ) -> Optional[DiagnosticReport]:
+        if report is None:
+            return None
+        with Session(self._engine) as db:
+            attached = db.get(DiagnosticReport, report.id)
+            if attached is not None:
+                maybe_auto_add_report(db, attached)
+        return report
+
+    def review_list_metadata(self, report: DiagnosticReport) -> tuple[bool, Optional[str]]:
+        with Session(self._engine) as db:
+            item = db.exec(select(KnowledgeReviewItem).where(
+                KnowledgeReviewItem.user_id == report.user_id,
+                KnowledgeReviewItem.kp_id == report.kp_id,
+            )).first()
+        return item is not None, item.source if item else None
 
     def _get_material_name(self, material_id: Optional[str]) -> Optional[str]:
         if material_id is None:
@@ -344,6 +367,10 @@ def get_report_detail(
     ).first()
     if record is None:
         return None
+    review_item = db.exec(select(KnowledgeReviewItem).where(
+        KnowledgeReviewItem.user_id == user_id,
+        KnowledgeReviewItem.kp_id == record.kp_id,
+    )).first()
     return ReportDetailData(
         report_id=record.id,
         kp_id=record.kp_id,
@@ -355,6 +382,8 @@ def get_report_detail(
         overall_comment=record.overall_comment,
         gaps_identified=record.gaps_identified,
         review_plan=_parse_review_plan(record.review_plan),
+        review_list_added=review_item is not None,
+        review_list_source=review_item.source if review_item else None,
         created_at=record.created_at,
     )
 

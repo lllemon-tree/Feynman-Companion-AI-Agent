@@ -18,6 +18,8 @@ from backend.app.services.prompts import (
     build_conversation_system_prompt,
     build_kp_user_prompt,
     build_rubric_user_prompt,
+    KNOWLEDGE_CARD_SYSTEM_PROMPT,
+    build_knowledge_card_user_prompt,
 )
 
 
@@ -98,6 +100,22 @@ class DeepSeekClient:
             user_prompt=build_rubric_user_prompt(source_text, kp_name),
         )
 
+    async def generate_knowledge_card(
+        self,
+        knowledge_point: KnowledgePoint,
+    ) -> dict[str, Any]:
+        return await self._request_json(
+            system_prompt=KNOWLEDGE_CARD_SYSTEM_PROMPT,
+            user_prompt=build_knowledge_card_user_prompt(
+                kp_name=knowledge_point.name,
+                summary=knowledge_point.summary,
+                rubric=knowledge_point.rubric,
+                source_chunks=knowledge_point.source_chunks,
+            ),
+            model=self._settings.knowledge_card_model,
+            disable_thinking=True,
+        )
+
     async def respond_in_conversation(self, mode: str, history: str, user_input: str, model: str | None = None) -> str:
         system_prompt = build_conversation_system_prompt(
             mode, structured_output=True
@@ -171,7 +189,8 @@ class DeepSeekClient:
         )
 
     async def _request_json(
-        self, system_prompt: str, user_prompt: str, model: str | None = None
+        self, system_prompt: str, user_prompt: str, model: str | None = None,
+        disable_thinking: bool = False,
     ) -> dict[str, Any]:
         if not self._settings.deepseek_configured:
             raise RuntimeError("DeepSeek API key is not configured.")
@@ -208,6 +227,8 @@ class DeepSeekClient:
             "temperature": 0.2,
             "response_format": {"type": "json_object"},
         }
+        if disable_thinking:
+            payload["thinking"] = {"type": "disabled"}
         headers = {
             "Authorization": f"Bearer {self._settings.deepseek_api_key}",
             "Content-Type": "application/json",

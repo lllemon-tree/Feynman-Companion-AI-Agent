@@ -6,6 +6,7 @@ import MessageBubble from '@/components/MessageBubble.vue'
 import LoadingBubble from '@/components/LoadingBubble.vue'
 import ReportCard from '@/components/ReportCard.vue'
 import ChatInput from '@/components/ChatInput.vue'
+import { addReportToReviewList } from '@/api/feynman'
 
 const router = useRouter()
 const ReportDrawer = defineAsyncComponent(() => import('@/components/DetailedReportDrawer.vue'))
@@ -15,11 +16,17 @@ const store = useChatStore()
 const drawerOpen = ref(false)
 const messageListEl = ref(null)
 const pinnedToBottom = ref(true)
+const reviewAdding = ref(false)
 const contextLabel = computed(() => [store.subject, store.materialTitle, store.chapterTitle].filter(Boolean).join(' / '))
 const hasVisiblePendingReply = computed(() => {
   const lastMessage = store.messages.at(-1)
   return lastMessage?.role === 'ai' && Boolean(lastMessage.content)
 })
+const canFinishEarly = computed(() =>
+  !store.isLocked &&
+  !store.isReportReady &&
+  store.messages.some(item => item.role === 'user' && item.content.trim())
+)
 
 function goBack() {
   router.push('/select')
@@ -113,6 +120,28 @@ function openDrawer() {
   drawerOpen.value = true
 }
 
+async function finishAndEvaluate() {
+  await store.finishAndEvaluate()
+}
+
+async function addCurrentReportToReviewList() {
+  if (reviewAdding.value || store.reportData?.reviewListAdded) return
+  if (!store.reportData?.reportId) {
+    store.setError('报告编号尚未保存，请稍后刷新历史报告后再试。')
+    return
+  }
+  reviewAdding.value = true
+  try {
+    const item = await addReportToReviewList(store.reportData.reportId)
+    store.reportData.reviewListAdded = true
+    store.reportData.reviewListSource = item.source || 'manual'
+  } catch (error) {
+    store.setError(error.message || '加入复习列表失败')
+  } finally {
+    reviewAdding.value = false
+  }
+}
+
 /** 返回个人中心（复习完成后） */
 function backToProfile() {
   router.push('/profile?from=review')
@@ -190,7 +219,12 @@ function continueLearning() {
           :final-report="store.reportData.finalReport"
           :fallback-used="store.reportData.fallbackUsed"
           :provider="store.reportData.provider"
+          :review-list-added="store.reportData.reviewListAdded"
+          :review-list-source="store.reportData.reviewListSource"
+          :review-adding="reviewAdding"
+          :show-review-action="Boolean(store.reportData.reportId)"
           @click="openDrawer"
+          @add-review="addCurrentReportToReviewList"
         />
 
         <!-- 复习结果反馈（第八周 P0） -->
@@ -206,6 +240,12 @@ function continueLearning() {
 
     <!-- 底部输入区 -->
     <div class="composer-wrap">
+      <div v-if="!store.isReportReady" class="finish-row">
+        <span>觉得已经讲清楚了？可以主动结束，不必等系统继续追问。</span>
+        <button type="button" :disabled="!canFinishEarly" @click="finishAndEvaluate">
+          完成讲解并评估
+        </button>
+      </div>
       <ChatInput
         :locked="store.isLocked"
         :finished="store.isReportReady"
@@ -224,8 +264,13 @@ function continueLearning() {
       :card-preview="store.reportData?.cardPreview"
       :fallback-used="store.reportData?.fallbackUsed"
       :provider="store.reportData?.provider"
+      :review-list-added="store.reportData?.reviewListAdded"
+      :review-list-source="store.reportData?.reviewListSource"
+      :review-adding="reviewAdding"
+      :show-review-action="Boolean(store.reportData?.reportId)"
       @close="drawerOpen = false"
       @restart="handleRestart"
+      @add-review="addCurrentReportToReviewList"
     />
   </div>
 </template>
@@ -326,6 +371,10 @@ function continueLearning() {
 .chat-error { margin: 0; padding: 10px 13px; border-radius: 10px; background: #fff6f3; color: #a84a36; font-size: 12px; }
 .stream-status { margin: -8px 0 0 43px; color: #91a0b6; font-size: 11px; }
 .composer-wrap { flex: none; padding: 0 30px 16px; background: linear-gradient(180deg, rgba(255,255,255,0), #fff 15%); }
+.finish-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; max-width: 840px; margin: 0 auto 10px; padding: 9px 12px; border: 1px solid #e5ebf5; border-radius: 10px; background: #f8faff; }
+.finish-row span { color: #7b899f; font-size: 11px; line-height: 1.5; }
+.finish-row button { flex: none; padding: 7px 11px; border-radius: 8px; background: #edf3ff; color: #2d61cb; font-size: 11px; font-weight: 650; }
+.finish-row button:disabled { color: #a0adbf; background: #f1f4f8; cursor: not-allowed; }
 .composer-wrap :deep(.chat-input) { max-width: 840px; margin: 0 auto; padding: 0; border: 0; background: transparent; }
 .composer-wrap :deep(.input-box) { padding: 10px 13px; border: 1px solid #dbe4f4; border-radius: 15px; box-shadow: 0 8px 28px rgba(39,79,150,.06); }
 .composer-wrap :deep(textarea) { padding: 8px 3px; min-height: 48px; font-size: 14px; }

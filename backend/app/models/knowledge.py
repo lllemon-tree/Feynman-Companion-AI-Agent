@@ -156,6 +156,7 @@ class KnowledgePointItem(BaseModel):
     page_start: int
     page_end: int
     status: str
+    learning_status: str = "unlearned"
     tag: Optional[str] = None # 预留给 "高频考点" 等标签
 
 class ChapterItem(BaseModel):

@@ -10,7 +10,7 @@ export const useChatStore = defineStore('chat', {
     isLocked: false,
     streamStatus: '',
     isReportReady: false,
-    reportData: /** @type {{cardPreview: object, finalReport: object, reviewPlan: object | null, provider: string | null, fallbackUsed: boolean} | null} */ (null),
+    reportData: /** @type {{cardPreview: object, finalReport: object, reviewPlan: object | null, provider: string | null, fallbackUsed: boolean, reportId: string, reviewListAdded: boolean, reviewListSource: string | null} | null} */ (null),
     errorMsg: '',
     kpId: '',
     kpName: '',
@@ -64,7 +64,10 @@ export const useChatStore = defineStore('chat', {
             finalReport: detail.report_data.final_report,
             reviewPlan: detail.report_data.review_plan || null,
             provider: detail.report_data.provider || null,
-            fallbackUsed: Boolean(detail.report_data.fallback_used)
+            fallbackUsed: Boolean(detail.report_data.fallback_used),
+            reportId: detail.report_data.report_id || '',
+            reviewListAdded: Boolean(detail.report_data.review_list_added),
+            reviewListSource: detail.report_data.review_list_source || null
           }
         : null
       this.isLocked = this.isReportReady
@@ -191,6 +194,37 @@ export const useChatStore = defineStore('chat', {
       }
     },
 
+    async finishAndEvaluate() {
+      if (this.isLocked || this.isReportReady) return null
+      if (!this.messages.some(item => item.role === 'user' && item.content.trim())) {
+        this.errorMsg = '请先讲出你对该知识点的理解，再生成评估。'
+        return null
+      }
+      const pending = this.pushMessage('ai', '')
+      this.isLocked = true
+      this.streamStatus = '正在整理你的累计讲解…'
+      this.errorMsg = ''
+      try {
+        const data = await streamChatWithAgent(
+          this.sessionId,
+          '',
+          this.kpId,
+          (delta) => { pending.content += delta },
+          (_stage, text) => { this.streamStatus = text },
+          true
+        )
+        await this.handleAgentResponse(data, pending.id)
+        return data
+      } catch (error) {
+        this.messages = this.messages.filter(item => item.id !== pending.id)
+        this.isLocked = false
+        this.errorMsg = error.message || '生成评估失败，请重试。'
+        return null
+      } finally {
+        this.streamStatus = ''
+      }
+    },
+
     /**
      * 处理 Agent 响应
      * 第八周：报告生成后，若处于复习模式，自动拉取复习结果对比
@@ -201,7 +235,10 @@ export const useChatStore = defineStore('chat', {
         return
       }
 
-      const { next_action, reply_text, card_preview, final_report, review_plan, provider, fallback_used } = data
+      const {
+        next_action, reply_text, card_preview, final_report, review_plan,
+        provider, fallback_used, report_id, review_list_added, review_list_source
+      } = data
 
       const pending = this.messages.find(item => item.id === pendingId)
       if (reply_text && pending) {
@@ -219,7 +256,10 @@ export const useChatStore = defineStore('chat', {
           finalReport: final_report || null,
           reviewPlan: review_plan || null,
           provider: provider || null,
-          fallbackUsed: Boolean(fallback_used)
+          fallbackUsed: Boolean(fallback_used),
+          reportId: report_id || '',
+          reviewListAdded: Boolean(review_list_added),
+          reviewListSource: review_list_source || null
         }
         // 复习模式：后端生成报告并完成事务后，前端拉取复习结果对比
         if (this.isReviewMode && this.reviewId) {

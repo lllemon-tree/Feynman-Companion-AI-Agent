@@ -8,9 +8,13 @@ const props = defineProps({
   reviewPlan: { type: Object, default: null },
   provider: { type: String, default: null },
   fallbackUsed: { type: Boolean, default: false },
-  loading: { type: Boolean, default: false }
+  loading: { type: Boolean, default: false },
+  showReviewAction: { type: Boolean, default: false },
+  reviewListAdded: { type: Boolean, default: false },
+  reviewListSource: { type: String, default: null },
+  reviewAdding: { type: Boolean, default: false }
 })
-const emit = defineEmits(['close', 'restart'])
+const emit = defineEmits(['close', 'restart', 'add-review'])
 
 const dimensions = computed(() => props.report?.dimensions || [])
 const totalScore = computed(() => dimensions.value.reduce((sum, item) => sum + Number(item.score || 0), 0))
@@ -89,6 +93,16 @@ onBeforeUnmount(() => {
               <span class="section-kicker">本轮结论</span>
               <h3>{{ focusSummary }}</h3>
               <p>{{ report?.overall_comment || '请结合下面的逐维反馈继续完善讲解。' }}</p>
+              <button
+                v-if="showReviewAction"
+                type="button"
+                class="drawer-review-button"
+                :class="{ 'drawer-review-button--added': reviewListAdded }"
+                :disabled="reviewListAdded || reviewAdding"
+                @click="$emit('add-review')"
+              >
+                {{ reviewListAdded ? (reviewListSource === 'automatic' ? '低于6分，已自动加入复习列表' : '已加入复习列表') : (reviewAdding ? '正在添加…' : '添加到复习列表') }}
+              </button>
             </div>
           </section>
 
@@ -186,6 +200,8 @@ onBeforeUnmount(() => {
 .overview-copy { padding: 17px 20px; border: 1px solid #e8eef7; border-radius: 14px; background: #f9fbff; }
 .overview-copy h3 { margin: 8px 0; color: #1b2b49; font-size: 18px; line-height: 1.4; }
 .overview-copy p { margin: 0; color: #61718b; font-size: 13px; line-height: 1.75; white-space: pre-wrap; }
+.drawer-review-button { margin-top: 14px; padding: 8px 12px; border-radius: 8px; background: #eaf1ff; color: #285fcf; font-size: 11px; font-weight: 650; }
+.drawer-review-button--added { background: #edf8f3; color: #27815f; cursor: default; }
 .dimension-section, .plan-section { margin-top: 31px; }
 .section-heading { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 15px; }
 .section-heading h3 { margin: 4px 0 0; color: #1b2b49; font-size: 18px; }

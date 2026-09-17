@@ -27,6 +27,13 @@ def create_db_and_tables():
     from backend.app.models.knowledge_gap import KnowledgeGap  
     from backend.app.models.review_attempt import ReviewAttempt
     from backend.app.models.conversation import Conversation, ConversationMessage
+    from backend.app.models.learning import (
+        KnowledgeCard,
+        KnowledgeCardCollection,
+        KnowledgeCardFavorite,
+        KnowledgeCardFavoriteCollectionLink,
+        KnowledgeReviewItem,
+    )
     
     SQLModel.metadata.create_all(engine)
     with engine.begin() as connection:
@@ -84,6 +91,32 @@ def create_db_and_tables():
                     connection.execute(text(
                         f"ALTER TABLE knowledge_gap ADD COLUMN {column_name} VARCHAR"
                     ))
+        if inspect(connection).has_table("knowledge_card_favorite"):
+            favorite_columns = {
+                column["name"]
+                for column in inspect(connection).get_columns("knowledge_card_favorite")
+            }
+            favorite_snapshot_columns = {
+                "kp_id": "TEXT NOT NULL DEFAULT ''",
+                "kp_name": "TEXT NOT NULL DEFAULT ''",
+                "summary": "TEXT NOT NULL DEFAULT ''",
+                "material_id": "TEXT NOT NULL DEFAULT ''",
+                "material_name": "TEXT NOT NULL DEFAULT ''",
+                "material_subject": "TEXT NOT NULL DEFAULT ''",
+                "chapter_id": "TEXT NOT NULL DEFAULT ''",
+                "chapter_name": "TEXT NOT NULL DEFAULT ''",
+                "content_snapshot_json": (
+                    "TEXT NOT NULL DEFAULT "
+                    "'{\"generation_status\":\"ready\",\"coverage_level\":\"limited\","
+                    "\"coverage_notice\":\"\",\"estimated_minutes\":5,\"sections\":[]}'"
+                ),
+            }
+            for column_name, column_sql in favorite_snapshot_columns.items():
+                if column_name not in favorite_columns:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE knowledge_card_favorite "
+                        f"ADD COLUMN {column_name} {column_sql}"
+                    )
     with Session(engine) as session:
         if session.get(User, GUEST_USER_ID) is None:
             session.add(
