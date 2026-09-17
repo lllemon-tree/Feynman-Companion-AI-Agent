@@ -10,6 +10,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 const open = ref(false)
 const conversations = ref([])
+const profileDropdownOpen = ref(false)
+const profileDropdownRef = ref(null)
 const isGuest = computed(() => !authStore.isLoggedIn && localStorage.getItem('feynman_guest') === 'true')
 const displayName = computed(() => isGuest.value ? '访客' : (authStore.username || '同学'))
 const navigation = [
@@ -43,6 +45,27 @@ function newChat() {
   if (!window.dispatchEvent(new Event('feynman:new-chat', { cancelable: true }))) return
   router.push('/home')
 }
+function toggleProfileDropdown() {
+  profileDropdownOpen.value = !profileDropdownOpen.value
+}
+function handleLogout() {
+  authStore.logout()
+  profileDropdownOpen.value = false
+  router.push('/login')
+}
+function handleProfile() {
+  profileDropdownOpen.value = false
+  navigate('/profile')
+}
+function handleLogin() {
+  profileDropdownOpen.value = false
+  router.push('/login')
+}
+function closeProfileDropdown(e) {
+  if (profileDropdownRef.value && !profileDropdownRef.value.contains(e.target)) {
+    profileDropdownOpen.value = false
+  }
+}
 function openConversation(id) {
   if (!window.dispatchEvent(new Event('feynman:before-navigate', { cancelable: true }))) return
   open.value = false
@@ -55,8 +78,12 @@ watch(() => route.path, path => {
 onMounted(() => {
   refreshConversations()
   window.addEventListener('feynman:conversations-updated', refreshConversations)
+  document.addEventListener('click', closeProfileDropdown)
 })
-onUnmounted(() => window.removeEventListener('feynman:conversations-updated', refreshConversations))
+onUnmounted(() => {
+  window.removeEventListener('feynman:conversations-updated', refreshConversations)
+  document.removeEventListener('click', closeProfileDropdown)
+})
 defineExpose({ openMenu: () => { open.value = true } })
 </script>
 
@@ -86,9 +113,24 @@ defineExpose({ openMenu: () => { open.value = true } })
       </div>
       <p v-else class="history-empty">{{ isGuest ? '登录后保存对话' : '暂无对话记录' }}</p>
     </div>
-    <button class="profile" type="button" @click="navigate('/profile')">
-      <span class="avatar">{{ displayName.slice(0, 1).toUpperCase() }}</span>
-      <span class="profile-name">{{ displayName }}</span><AppIcon name="chevron" :size="16" />
+    <div v-if="!isGuest" ref="profileDropdownRef" class="profile-wrapper">
+      <button class="profile" type="button" @click.stop="toggleProfileDropdown">
+        <span class="avatar">{{ displayName.slice(0, 1).toUpperCase() }}</span>
+        <span class="profile-name">{{ displayName }}</span>
+        <AppIcon name="chevron" :size="16" :class="{ 'rotate-180': profileDropdownOpen }" />
+      </button>
+      <div v-if="profileDropdownOpen" class="profile-dropdown">
+        <button class="dropdown-item" type="button" @click.stop="handleProfile">
+          <AppIcon name="user" :size="14" /><span>个人中心</span>
+        </button>
+        <button class="dropdown-item dropdown-item--danger" type="button" @click.stop="handleLogout">
+          <AppIcon name="logout" :size="14" /><span>退出登录</span>
+        </button>
+      </div>
+    </div>
+    <button v-else class="profile profile--login" type="button" @click="handleLogin">
+      <span class="avatar">访</span>
+      <span class="profile-name">去登录</span>
     </button>
   </aside>
 </template>
@@ -110,8 +152,16 @@ defineExpose({ openMenu: () => { open.value = true } })
 .history-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .history-item--active { background: #eaf1ff; color: #245bd4; }
 .history-empty { padding: 4px 5px; color: #a1adbe; font-size: 12px; }
-.profile { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 51px; margin-top: auto; padding: 8px; border-top: 1px solid #e5ebf4; color: #17233b; text-align: left; }
+.profile-wrapper { position: relative; margin-top: auto; padding-top: 1px; border-top: 1px solid #e5ebf4; }
+.profile { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 51px; padding: 8px; color: #17233b; text-align: left; }
 .profile:hover { color: #1d4ed8; }
+.profile--login { border-top: 1px solid #e5ebf4; }
+.profile-dropdown { position: absolute; bottom: calc(100% + 6px); left: 8px; right: 8px; background: #fff; border: 1px solid #e5ebf4; border-radius: 12px; box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08); overflow: hidden; z-index: 50; }
+.dropdown-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 10px 16px; text-align: left; font-size: 14px; color: #17233b; transition: all 150ms; }
+.dropdown-item:hover { background: #edf3fc; }
+.dropdown-item--danger { color: #ef4444; }
+.dropdown-item--danger:hover { background: rgba(239, 68, 68, 0.06); }
+.rotate-180 { transform: rotate(180deg); transition: transform 150ms; }
 .avatar { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: #dfe8f8; color: #325aa6; font-size: 12px; font-weight: 700; }
 .profile-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .scrim { display: none; }
