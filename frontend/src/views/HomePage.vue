@@ -10,6 +10,7 @@ import {
   streamConversationMessage
 } from '@/api/feynman'
 import { enterAction } from '@/utils/imeKeydown'
+import MarkdownContent from '@/components/MarkdownContent.vue'
 import AppIcon from '@/components/AppIcon.vue'
 
 const router = useRouter()
@@ -304,7 +305,10 @@ function handleInputKeydown(event) {
               <div v-if="message.role === 'assistant'" class="message-meta">
                 {{ message.mode === 'expert' ? '专家模式' : '小白模式' }}<span v-if="message.model"> · {{ modelName(message.model) }}</span>
               </div>
-              <p v-if="!message.assessment" class="message-text">{{ message.content }}</p>
+              <div v-if="!message.assessment && message.role === 'assistant'" class="message-text">
+                <MarkdownContent :content="message.content" />
+              </div>
+              <p v-else-if="!message.assessment" class="message-text">{{ message.content }}</p>
               <div v-else class="assessment-card">
                 <div class="assessment-heading">讲解反馈 <span>无指定教材 · 不给数值分数</span></div>
                 <p class="assessment-topic">主题：{{ message.assessment.topic }}</p>
