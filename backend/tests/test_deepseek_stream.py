@@ -75,6 +75,8 @@ class DeepSeekStreamTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(captured["model"], "deepseek-flash")
         self.assertTrue(captured["stream"])
         self.assertEqual(captured["thinking"], {"type": "disabled"})
+        self.assertIn("贯彻费曼学习法", captured["messages"][0]["content"])
+        self.assertIn("不要为了互动而连续反问", captured["messages"][0]["content"])
         self.assertEqual(chunks, ["你好", "，世界"])
 
 
