@@ -67,7 +67,7 @@ def list_conversations(
 @router.get("/models")
 def list_chat_models():
     options, default = _model_options()
-    labels = {"deepseek-flash": "DeepSeek Flash", "deepseek-v4-pro": "DeepSeek V4 Pro"}
+    labels = {"deepseek-flash": "DeepSeek Flash", "deepseek-v4-flash": "DeepSeek V4 Flash"}
     return {
         "code": 200,
         "msg": "success",

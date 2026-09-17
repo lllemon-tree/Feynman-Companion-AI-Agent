@@ -31,7 +31,7 @@ class DeepSeekStreamTest(unittest.IsolatedAsyncioTestCase):
         settings = Settings(
             llm_provider="deepseek",
             deepseek_api_key="unit-test-only",
-            deepseek_model="deepseek-v4-pro",
+            deepseek_model="deepseek-v4-flash",
             knowledge_card_model="deepseek-v4-flash",
         )
         point = KnowledgePoint(

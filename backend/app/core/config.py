@@ -30,7 +30,7 @@ class Settings(BaseModel):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-flash"
     knowledge_card_model: str = "deepseek-v4-flash"
-    free_chat_models: tuple[str, ...] = ("deepseek-flash", "deepseek-v4-pro")
+    free_chat_models: tuple[str, ...] = ("deepseek-flash", "deepseek-v4-flash")
     request_timeout_seconds: float = 30.0
     max_follow_ups: int = 3
     max_extraction_concurrency: int = 2
@@ -77,7 +77,7 @@ def get_settings() -> Settings:
         knowledge_card_model=pick("KNOWLEDGE_CARD_MODEL", "deepseek-v4-flash"),
         free_chat_models=tuple(dict.fromkeys(
             model.strip() for model in pick(
-                "DEEPSEEK_CHAT_MODELS", "deepseek-flash,deepseek-v4-pro"
+                "DEEPSEEK_CHAT_MODELS", "deepseek-flash,deepseek-v4-flash"
             ).split(",") if model.strip()
         )),
         request_timeout_seconds=pick_float("REQUEST_TIMEOUT_SECONDS", 30.0),

@@ -37,8 +37,8 @@ cp .env.local.example .env.local
 ```env
 DEEPSEEK_API_KEY=your_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-v4-pro
-DEEPSEEK_CHAT_MODELS=deepseek-flash,deepseek-v4-pro
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_CHAT_MODELS=deepseek-flash,deepseek-v4-flash
 LLM_PROVIDER=deepseek
 REQUEST_TIMEOUT_SECONDS=30
 AUTH_SECRET_KEY=replace_with_a_long_random_secret
