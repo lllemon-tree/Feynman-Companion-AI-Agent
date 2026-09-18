@@ -835,6 +835,15 @@ export async function getReviewDueGaps() {
 }
 
 /**
+ * 获取知识点复习列表（按 kp_id 分组）
+ * @returns {Promise<{items: Array, total: number}>}
+ */
+export async function getStudyReviewList() {
+  const data = await http.get('/study-review/list')
+  return data?.data
+}
+
+/**
  * 获取学情统计数据
  */
 export async function getUserStats() {

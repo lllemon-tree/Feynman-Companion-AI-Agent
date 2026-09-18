@@ -3,7 +3,7 @@ import { ref, onMounted, computed, onActivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
-import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview, addReportToReviewList } from '@/api/feynman'
+import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview, getStudyReviewList, addReportToReviewList } from '@/api/feynman'
 import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
 import ReportDrawer from '@/components/DetailedReportDrawer.vue'
 import FavoriteCardsPanel from '@/components/FavoriteCardsPanel.vue'
@@ -284,13 +284,14 @@ async function loadGaps() {
   if (!isLoggedIn.value) return
   loadingGaps.value = true
   try {
-    const [gapsData, statsData] = await Promise.all([
+    const [gapsData, statsData, reviewListData] = await Promise.all([
       getGaps(activeGapStatus.value),
-      getGapsStats()
+      getGapsStats(),
+      getStudyReviewList()
     ])
     gaps.value = gapsData.items || []
     gapStats.value = statsData
-    studyReviewItems.value = []
+    studyReviewItems.value = reviewListData?.items || []
   } catch (e) {
     gaps.value = []
     gapStats.value = {}
