@@ -3,11 +3,10 @@ import { ref, onMounted, computed, onActivated, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatStore } from '@/stores/chatStore'
-import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview, getStudyReviewList, addReportToReviewList } from '@/api/feynman'
+import { getKnowledgeTree, getUserProfile, getGaps, getGapsStats, updateGapStatus, getReports, getReportDetail, getSessionList, getSessionDetail, fetchSubjects, getReviewDueGaps, getUserStats, startReview, addReportToReviewList } from '@/api/feynman'
 import ProfileSetupModal from '@/components/ProfileSetupModal.vue'
 import ReportDrawer from '@/components/DetailedReportDrawer.vue'
 import FavoriteCardsPanel from '@/components/FavoriteCardsPanel.vue'
-import KnowledgeCardDialog from '@/components/KnowledgeCardDialog.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -35,28 +34,13 @@ const gaps = ref([])
 const gapStats = ref({})
 const activeGapStatus = ref('open')
 const loadingGaps = ref(false)
-const expandedKps = ref(new Set())
 const reviewDueGaps = ref([])
 const showReviewDue = ref(false)
 const loadingReviewDue = ref(false)
-const studyReviewItems = ref([])
 
 // 复习入口加载态：避免重复点击
 const reviewStarting = ref(false)
 const reviewStartingKpId = ref('')
-const reviewCardOpen = ref(false)
-const pendingReview = ref(null)
-
-function openReviewCard(kind, payload) {
-  pendingReview.value = { kind, payload }
-  reviewCardOpen.value = true
-}
-
-function closeReviewCard() {
-  if (reviewStarting.value) return
-  reviewCardOpen.value = false
-  pendingReview.value = null
-}
 
 // 标记是否从对话页返回（返回后需要刷新漏洞/统计）
 const needRefreshOnReturn = ref(false)
@@ -78,16 +62,6 @@ function showToast(msg, duration = 2200) {
 const userStats = ref(null)
 const loadingUserStats = ref(false)
 
-function toggleKp(kpId) {
-  const next = new Set(expandedKps.value)
-  if (next.has(kpId)) {
-    next.delete(kpId)
-  } else {
-    next.add(kpId)
-  }
-  expandedKps.value = next
-}
-
 /**
  * 知识漏洞列表：开始复习 / 手动标记已掌握 / 重新打开
  * 第八周：开始复习统一调用 POST /reviews/start，不再直接 PATCH reviewing
@@ -96,9 +70,34 @@ function toggleKp(kpId) {
  * - 复习中 → 手动标记已掌握（PATCH resolved）
  */
 async function startReviewKp(group) {
-  // 真正进入复习讲解前，先让用户主动完成一次知识输入回顾。
+  // 有未解决漏洞：调用 startReview 进入复习对话
   if (group.dimensions.some(d => d.status === 'open' || d.status === 'reviewing')) {
-    openReviewCard('gap', group)
+    if (reviewStarting.value) return
+    reviewStarting.value = true
+    reviewStartingKpId.value = group.kp_id
+    try {
+      const reviewData = await startReview(group.kp_id, 'gap')
+      // 恢复已有复习记录时给出提示
+      if (reviewData.resumed) {
+        showToast('继续上次复习')
+      }
+      // 设置 chatStore 复习上下文（reviewId/sessionId/targetGaps 等）
+      chatStore.clearReviewContext()
+      chatStore.clearKnowledgeContext()
+      chatStore.setKnowledgePoint(group.kp_id, group.kp_name)
+      chatStore.startReviewContext(reviewData)
+      // 标记返回后需要刷新
+      needRefreshOnReturn.value = true
+      router.push('/study')
+    } catch (e) {
+      const msg = e.status === 409
+        ? '当前知识点暂无未解决漏洞，可能已全部掌握'
+        : '开始复习失败: ' + e.message
+      alert(msg)
+    } finally {
+      reviewStarting.value = false
+      reviewStartingKpId.value = ''
+    }
     return
   }
   // 全部已掌握：手动重新打开
@@ -124,31 +123,6 @@ async function startReviewKp(group) {
   }
 }
 
-async function enterGapReview(group) {
-  if (reviewStarting.value) return
-  reviewStarting.value = true
-  reviewStartingKpId.value = group.kp_id
-  try {
-    const reviewData = await startReview(group.kp_id, 'gap')
-    if (reviewData.resumed) showToast('继续上次复习')
-    chatStore.clearReviewContext()
-    chatStore.clearKnowledgeContext()
-    chatStore.setKnowledgePoint(group.kp_id, group.kp_name)
-    chatStore.startReviewContext(reviewData)
-    needRefreshOnReturn.value = true
-    reviewCardOpen.value = false
-    router.push('/study')
-  } catch (e) {
-    const msg = e.status === 409
-      ? '当前知识点暂无未解决漏洞，可能已全部掌握'
-      : '开始复习失败: ' + e.message
-    showToast(msg)
-  } finally {
-    reviewStarting.value = false
-    reviewStartingKpId.value = ''
-  }
-}
-
 /**
  * 今日待复习：开始或继续复习
  * 第八周：统一调用 POST /reviews/start
@@ -157,10 +131,6 @@ async function enterGapReview(group) {
  * 进入对话后保留知识点信息和本次复习目标
  */
 async function startDueReview(gap) {
-  openReviewCard('due', gap)
-}
-
-async function enterDueReview(gap) {
   if (reviewStarting.value) return
   reviewStarting.value = true
   reviewStartingKpId.value = gap.kp_id
@@ -174,7 +144,6 @@ async function enterDueReview(gap) {
     chatStore.setKnowledgePoint(gap.kp_id, gap.kp_name)
     chatStore.startReviewContext(reviewData)
     needRefreshOnReturn.value = true
-    reviewCardOpen.value = false
     router.push('/study')
   } catch (e) {
     const msg = e.status === 409
@@ -184,18 +153,6 @@ async function enterDueReview(gap) {
   } finally {
     reviewStarting.value = false
     reviewStartingKpId.value = ''
-  }
-}
-
-function confirmReviewCard() {
-  const pending = pendingReview.value
-  if (!pending) return
-  if (pending.kind === 'gap') {
-    enterGapReview(pending.payload)
-  } else if (pending.kind === 'due') {
-    enterDueReview(pending.payload)
-  } else {
-    enterStudyReview(pending.payload)
   }
 }
 
@@ -225,6 +182,13 @@ const groupedGaps = computed(() => {
       last_reviewed_at: gap.last_reviewed_at,
       next_review_at: gap.next_review_at
     })
+    const currentFocus = grouped[gap.kp_id].focus
+    if (!currentFocus || Number(gap.score) < Number(currentFocus.score)) {
+      grouped[gap.kp_id].focus = {
+        dimension: gap.dimension,
+        score: gap.score
+      }
+    }
     if (gap.status === 'open' && grouped[gap.kp_id].status !== 'open') {
       grouped[gap.kp_id].status = 'open'
     }
@@ -241,6 +205,7 @@ const showReportDetail = ref(false)
 const selectedReport = ref(null)
 const reportDetailLoading = ref(false)
 const reportReviewAdding = ref(false)
+const reportOpeningKpId = ref('')
 
 // 我的教材
 const materials = ref([])
@@ -284,34 +249,18 @@ async function loadGaps() {
   if (!isLoggedIn.value) return
   loadingGaps.value = true
   try {
-    const [gapsData, statsData, reviewListData] = await Promise.all([
+    const [gapsData, statsData] = await Promise.all([
       getGaps(activeGapStatus.value),
-      getGapsStats(),
-      getStudyReviewList()
+      getGapsStats()
     ])
     gaps.value = gapsData.items || []
     gapStats.value = statsData
-    studyReviewItems.value = reviewListData?.items || []
   } catch (e) {
     gaps.value = []
     gapStats.value = {}
-    studyReviewItems.value = []
   } finally {
     loadingGaps.value = false
   }
-}
-
-function restartStudyReview(item) {
-  openReviewCard('study-list', item)
-}
-
-function enterStudyReview(item) {
-  chatStore.clearReviewContext()
-  chatStore.clearKnowledgeContext()
-  if (item.material_id) chatStore.setMaterial(item.material_id, item.material_name || '')
-  chatStore.setKnowledgePoint(item.kp_id, item.kp_name)
-  reviewCardOpen.value = false
-  router.push('/study')
 }
 
 async function loadReviewDueGaps(openList = true) {
@@ -422,13 +371,31 @@ async function viewReportDetail(report) {
   }
 }
 
+async function viewLatestReportForKp(group) {
+  if (reportOpeningKpId.value) return
+  reportOpeningKpId.value = group.kp_id
+  try {
+    const data = await getReports({ kpId: group.kp_id, pageSize: 1 })
+    const report = data.items?.[0]
+    if (!report) {
+      showToast('这个知识点暂无可查看的学习报告')
+      return
+    }
+    await viewReportDetail(report)
+  } catch (error) {
+    showToast(error.message || '学习报告加载失败')
+  } finally {
+    reportOpeningKpId.value = ''
+  }
+}
+
 async function addSelectedReportToReviewList() {
   if (!selectedReport.value?.report_id || reportReviewAdding.value) return
   reportReviewAdding.value = true
   try {
-    const item = await addReportToReviewList(selectedReport.value.report_id)
+    await addReportToReviewList(selectedReport.value.report_id)
     selectedReport.value.review_list_added = true
-    selectedReport.value.review_list_source = item.source || 'manual'
+    selectedReport.value.review_list_source = null
     await loadGaps()
   } catch (error) {
     showToast(error.message || '加入复习列表失败')
@@ -770,26 +737,6 @@ onActivated(() => {
 
       <!-- 知识漏洞 Tab -->
       <div v-if="activeTab === 'gaps'" class="tab-content">
-        <section v-if="studyReviewItems.length" class="study-review-section">
-          <div class="study-review-heading">
-            <div>
-              <h3>知识点复习列表</h3>
-              <p>包含低于6分自动加入和你主动保留的知识点。</p>
-            </div>
-            <span>{{ studyReviewItems.length }} 项</span>
-          </div>
-          <div class="study-review-grid">
-            <article v-for="item in studyReviewItems" :key="item.review_item_id" class="study-review-card">
-              <div>
-                <span class="review-source">{{ item.source === 'automatic' ? '低分自动加入' : '手动添加' }}</span>
-                <h4>{{ item.kp_name }}</h4>
-                <p>{{ item.material_name || '当前教材' }}<span v-if="item.average_score !== null"> · 最近 {{ item.average_score }} 分</span></p>
-              </div>
-              <button type="button" @click="restartStudyReview(item)">重新学习</button>
-            </article>
-          </div>
-        </section>
-
         <!-- 今日待复习按钮 -->
         <button v-if="!showReviewDue" class="review-due-btn" @click="loadReviewDueGaps">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -834,6 +781,7 @@ onActivated(() => {
                 <span class="review-gap-kp">{{ gap.kp_name }}</span>
                 <span class="review-gap-dim" :class="getDimensionClass(gap.dimension)">{{ gap.dimension }}</span>
               </div>
+              <span v-if="gap.dimension_count > 1" class="review-gap-count">共 {{ gap.dimension_count }} 个待复习维度，当前展示最低分重点</span>
               <div class="review-gap-score">
                 <span class="review-score-value">{{ gap.score }}</span>
                 <span class="review-score-max">/ 10</span>
@@ -922,98 +870,59 @@ onActivated(() => {
           </button>
         </div>
 
-        <!-- 漏洞列表（按 KP 分组，折叠展开） -->
+        <!-- 复习知识点列表：每张卡片代表一个 KP，点击查看最近学习报告。 -->
         <div v-else class="gaps-list">
-          <div
+          <article
             v-for="group in groupedGaps"
             :key="group.kp_id"
             class="gap-card"
-            :class="{ 'gap-card--expanded': expandedKps.has(group.kp_id) }"
+            role="button"
+            tabindex="0"
+            @click="viewLatestReportForKp(group)"
+            @keydown.enter="viewLatestReportForKp(group)"
           >
-            <div class="gap-header" @click="toggleKp(group.kp_id)">
+            <div class="gap-header">
               <div class="gap-kp-info">
                 <span class="gap-kp-name">{{ group.kp_name }}</span>
                 <span class="gap-material-name" v-if="group.material_name">{{ group.material_name }}</span>
               </div>
               <div class="gap-header-right">
-                <span class="gap-dim-count">{{ group.dimensions.length }} 个薄弱维度</span>
-                <span class="gap-chevron" :class="{ 'gap-chevron--open': expandedKps.has(group.kp_id) }">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
+                <span class="gap-dim-count">{{ group.dimensions.length }} 个记录维度</span>
+                <span class="report-link-hint">{{ reportOpeningKpId === group.kp_id ? '读取中…' : '查看学习报告 →' }}</span>
               </div>
             </div>
-
-            <div v-if="expandedKps.has(group.kp_id)" class="gap-dimensions-grid">
-              <div
-                v-for="dim in group.dimensions"
-                :key="dim.gap_id"
-                class="gap-dim-row"
+            <div class="gap-focus-row">
+              <span class="dim-tag" :class="getDimensionClass(group.focus?.dimension)">复习重点 · {{ group.focus?.dimension }}</span>
+              <strong>{{ group.focus?.score }}<small>/10</small></strong>
+            </div>
+            <div class="gap-card-actions">
+              <button
+                v-if="group.dimensions.some(d => d.status === 'open' || d.status === 'reviewing')"
+                class="action-btn action-btn--review"
+                :disabled="reviewStarting && reviewStartingKpId === group.kp_id"
+                @click.stop="startReviewKp(group)"
               >
-                <div class="dim-row-header">
-                  <span class="dim-tag" :class="getDimensionClass(dim.dimension)">{{ dim.dimension }}</span>
-                  <span class="dim-score-text">{{ dim.score }}<small>/10</small></span>
-                </div>
-                <div class="dim-progress">
-                  <div
-                    class="dim-fill"
-                    :style="{ width: (dim.score / 10 * 100) + '%' }"
-                    :class="getScoreClass(dim.score)"
-                  ></div>
-                </div>
-                <p class="dim-desc" v-if="dim.gap_description">{{ dim.gap_description }}</p>
-                <div class="dim-review-meta">
-                  <span
-                    v-if="dim.status !== 'resolved' && formatNextReview(dim.next_review_at)"
-                    class="review-time-tag"
-                    :class="{ 'review-time--overdue': isOverdue(dim.next_review_at) }"
-                  >
-                    {{ formatNextReview(dim.next_review_at) }}
-                  </span>
-                  <span
-                    v-if="dim.status === 'reviewing' && formatLastReviewed(dim.last_reviewed_at)"
-                    class="last-review-tag"
-                  >
-                    {{ formatLastReviewed(dim.last_reviewed_at) }}
-                  </span>
-                  <span v-if="dim.review_count" class="review-count-tag">已复习 {{ dim.review_count }} 次</span>
-                </div>
-              </div>
-
-              <div class="gap-card-actions">
-                <button
-                  v-if="group.dimensions.some(d => d.status === 'open' || d.status === 'reviewing')"
-                  class="action-btn action-btn--review"
-                  :disabled="reviewStarting && reviewStartingKpId === group.kp_id"
-                  @click.stop="startReviewKp(group)"
+                <svg
+                  v-if="reviewStarting && reviewStartingKpId === group.kp_id"
+                  width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner"
                 >
-                  <svg
-                    v-if="reviewStarting && reviewStartingKpId === group.kp_id"
-                    width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner"
-                  >
-                    <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
-                  </svg>
-                  <span v-if="reviewStarting && reviewStartingKpId === group.kp_id">进入复习中...</span>
-                  <span v-else>开始复习</span>
-                </button>
-                <button
-                  v-if="group.dimensions.every(d => d.status === 'resolved')"
-                  class="action-btn action-btn--reopen"
-                  @click.stop="startReviewKp(group)"
-                >
-                  重新打开
-                </button>
-                <button
-                  v-if="!group.dimensions.some(d => d.status === 'open') && !group.dimensions.every(d => d.status === 'resolved')"
-                  class="action-btn action-btn--master"
-                  @click.stop="startReviewKp(group)"
-                >
-                  全部标记已掌握
-                </button>
-              </div>
+                  <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
+                </svg>
+                <span v-if="reviewStarting && reviewStartingKpId === group.kp_id">进入复习中...</span>
+                <span v-else>{{ group.dimensions.every(d => d.status === 'reviewing') ? '继续复习' : '开始复习' }}</span>
+              </button>
+              <button
+                v-if="group.dimensions.every(d => d.status === 'resolved')"
+                class="action-btn action-btn--reopen"
+                @click.stop="startReviewKp(group)"
+              >重新打开</button>
+              <button
+                v-if="!group.dimensions.some(d => d.status === 'open') && !group.dimensions.every(d => d.status === 'resolved')"
+                class="action-btn action-btn--master"
+                @click.stop="startReviewKp(group)"
+              >全部标记已掌握</button>
             </div>
-          </div>
+          </article>
         </div>
       </div>
 
@@ -1246,17 +1155,6 @@ onActivated(() => {
       @saved="handleProfileSaved"
     />
 
-    <KnowledgeCardDialog
-      :open="reviewCardOpen"
-      :kp-id="pendingReview?.payload?.kp_id || ''"
-      :fallback-name="pendingReview?.payload?.kp_name || ''"
-      :fallback-summary="pendingReview?.payload?.gap_description || ''"
-      :busy="reviewStarting"
-      start-label="开始费曼讲解"
-      @close="closeReviewCard"
-      @start="confirmReviewCard"
-    />
-
     <!-- 报告详情弹窗 -->
     <ReportDrawer
       :open="showReportDetail"
@@ -1264,7 +1162,6 @@ onActivated(() => {
       :loading="reportDetailLoading"
       show-review-action
       :review-list-added="selectedReport?.review_list_added"
-      :review-list-source="selectedReport?.review_list_source"
       :review-adding="reportReviewAdding"
       @close="showReportDetail = false"
       @add-review="addSelectedReportToReviewList"
@@ -1740,20 +1637,6 @@ export default {
   color: #6B7280;
 }
 
-/* 知识点级复习列表 */
-.study-review-section { margin-bottom: 18px; padding: 18px; border: 1px solid #e4eaf4; border-radius: 14px; background: #fff; }
-.study-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
-.study-review-heading h3 { margin: 0 0 5px; color: #24354f; font-size: 15px; }
-.study-review-heading p { margin: 0; color: #8795a9; font-size: 11px; }
-.study-review-heading > span { padding: 4px 8px; border-radius: 7px; background: #edf3ff; color: #3568cf; font-size: 11px; font-weight: 650; }
-.study-review-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.study-review-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid #e7ecf4; border-radius: 11px; background: #fafcff; }
-.study-review-card h4 { margin: 5px 0 4px; color: #293b57; font-size: 13px; }
-.study-review-card p { margin: 0; color: #8996a9; font-size: 10px; }
-.review-source { color: #6b7e9c; font-size: 10px; }
-.study-review-card button { flex: none; padding: 7px 10px; border-radius: 8px; background: #eaf1ff; color: #2c61cb; font-size: 11px; font-weight: 650; }
-@media (max-width: 760px) { .study-review-grid { grid-template-columns: 1fr; } }
-
 /* 今日待复习按钮和列表 */
 .review-due-btn {
   display: flex;
@@ -2213,7 +2096,12 @@ export default {
   border-radius: 12px;
   border: 1px solid #E2E8F0;
   overflow: hidden;
+  cursor: pointer;
+  transition: border-color 150ms, box-shadow 150ms, transform 150ms;
 }
+.review-gap-count { display: block; margin: -2px 0 8px; color: #7C8BA1; font-size: 11px; }
+.gap-card:hover { border-color: #AFC6EF; box-shadow: 0 8px 24px rgba(37, 99, 235, .08); transform: translateY(-1px); }
+.gap-card:focus-visible { outline: 3px solid #BFDBFE; outline-offset: 2px; }
 
 .gap-card--expanded {
   border-color: #2563EB;
@@ -2257,6 +2145,11 @@ export default {
   gap: 8px;
   flex-shrink: 0;
 }
+
+.report-link-hint { color: #2563EB; font-size: 12px; font-weight: 600; }
+.gap-focus-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 15px 16px; }
+.gap-focus-row strong { color: #1E293B; font-size: 20px; }
+.gap-focus-row strong small { margin-left: 2px; color: #94A3B8; font-size: 11px; font-weight: 500; }
 
 .gap-dim-count {
   font-size: 12px;
@@ -2367,6 +2260,7 @@ export default {
 .gap-card-actions {
   display: flex;
   gap: 8px;
+  margin: 0 16px 16px;
   padding-top: 12px;
   border-top: 1px solid #E2E8F0;
 }
