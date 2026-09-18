@@ -780,12 +780,17 @@ export async function getGapsStats() {
 /**
  * 获取历史报告列表
  */
-export async function getReports() {
+export async function getReports({ kpId = '', page = 1, pageSize = 20 } = {}) {
   if (USE_FEYNMAN_MOCK) {
     await delay(400)
-    return MOCK_REPORTS.data
+    const items = kpId
+      ? MOCK_REPORTS.data.items.filter(item => item.kp_id === kpId)
+      : MOCK_REPORTS.data.items
+    return { ...MOCK_REPORTS.data, items: items.slice(0, pageSize), total: items.length, page, page_size: pageSize }
   }
-  const data = await http.get('/reports')
+  const data = await http.get('/reports', {
+    params: { page, page_size: pageSize, ...(kpId ? { kp_id: kpId } : {}) }
+  })
   return data?.data
 }
 
@@ -805,19 +810,12 @@ export async function getReportDetail(reportId) {
 export async function addReportToReviewList(reportId) {
   if (USE_FEYNMAN_MOCK) {
     return {
-      review_item_id: `review-item-${reportId}`,
       report_id: reportId,
-      source: 'manual',
-      status: 'pending'
+      status: 'open',
+      dimensions: ['理解深度']
     }
   }
   const data = await http.post(`/study-review/reports/${reportId}`)
-  return data?.data
-}
-
-export async function getStudyReviewList() {
-  if (USE_FEYNMAN_MOCK) return { items: [], total: 0 }
-  const data = await http.get('/study-review')
   return data?.data
 }
 

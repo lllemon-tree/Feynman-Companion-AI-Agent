@@ -6,7 +6,8 @@ import MessageBubble from '@/components/MessageBubble.vue'
 import LoadingBubble from '@/components/LoadingBubble.vue'
 import ReportCard from '@/components/ReportCard.vue'
 import ChatInput from '@/components/ChatInput.vue'
-import { addReportToReviewList } from '@/api/feynman'
+import KnowledgeCardDialog from '@/components/KnowledgeCardDialog.vue'
+import { addReportToReviewList, getKnowledgeCard } from '@/api/feynman'
 
 const router = useRouter()
 const ReportDrawer = defineAsyncComponent(() => import('@/components/DetailedReportDrawer.vue'))
@@ -17,6 +18,10 @@ const drawerOpen = ref(false)
 const messageListEl = ref(null)
 const pinnedToBottom = ref(true)
 const reviewAdding = ref(false)
+const knowledgeCardOpen = ref(false)
+const knowledgeCardLoading = ref(false)
+const knowledgeCardError = ref('')
+const knowledgeCard = ref(null)
 const contextLabel = computed(() => [store.subject, store.materialTitle, store.chapterTitle].filter(Boolean).join(' / '))
 const hasVisiblePendingReply = computed(() => {
   const lastMessage = store.messages.at(-1)
@@ -30,6 +35,20 @@ const canFinishEarly = computed(() =>
 
 function goBack() {
   router.push('/select')
+}
+
+async function openKnowledgeCard() {
+  if (!store.kpId) return
+  knowledgeCardOpen.value = true
+  knowledgeCardLoading.value = !knowledgeCard.value
+  knowledgeCardError.value = ''
+  try {
+    knowledgeCard.value = await getKnowledgeCard(store.kpId)
+  } catch (error) {
+    knowledgeCardError.value = error.message || '知识卡片加载失败'
+  } finally {
+    knowledgeCardLoading.value = false
+  }
 }
 
 /** 滚到底部 */
@@ -90,6 +109,26 @@ onMounted(async () => {
   scrollToBottom(false)
 })
 
+watch(
+  () => route.query.sessionId,
+  async (sessionId) => {
+    if (!sessionId || sessionId === store.sessionId) return
+    store.clearReviewContext()
+    drawerOpen.value = false
+    knowledgeCardOpen.value = false
+    knowledgeCard.value = null
+    try {
+      await store.restoreSession(sessionId)
+    } catch (error) {
+      store.resetLocalState()
+      store.isLocked = true
+      store.setError(error.message || '历史会话恢复失败')
+      store.pushMessage('system', '未能恢复历史会话，请返回知识点选择后重试。')
+    }
+    scrollToBottom(false)
+  }
+)
+
 // 离开页面时清空复习上下文，避免影响下次普通学习
 onBeforeUnmount(() => {
   store.clearReviewContext()
@@ -132,9 +171,9 @@ async function addCurrentReportToReviewList() {
   }
   reviewAdding.value = true
   try {
-    const item = await addReportToReviewList(store.reportData.reportId)
+    await addReportToReviewList(store.reportData.reportId)
     store.reportData.reviewListAdded = true
-    store.reportData.reviewListSource = item.source || 'manual'
+    store.reportData.reviewListSource = null
   } catch (error) {
     store.setError(error.message || '加入复习列表失败')
   } finally {
@@ -165,7 +204,10 @@ function continueLearning() {
         </div>
         <p>{{ contextLabel || '选定知识点 · 费曼讲解' }}</p>
       </div>
-      <button class="header-switch" type="button" @click="goBack">切换知识点</button>
+      <div class="header-actions">
+        <button v-if="store.isReviewMode" class="knowledge-card-button" type="button" @click="openKnowledgeCard">知识卡片</button>
+        <button class="header-switch" type="button" @click="goBack">切换知识点</button>
+      </div>
     </header>
 
     <!-- 复习场景提示横幅（第八周 P0） -->
@@ -220,7 +262,6 @@ function continueLearning() {
           :fallback-used="store.reportData.fallbackUsed"
           :provider="store.reportData.provider"
           :review-list-added="store.reportData.reviewListAdded"
-          :review-list-source="store.reportData.reviewListSource"
           :review-adding="reviewAdding"
           :show-review-action="Boolean(store.reportData.reportId)"
           @click="openDrawer"
@@ -265,12 +306,24 @@ function continueLearning() {
       :fallback-used="store.reportData?.fallbackUsed"
       :provider="store.reportData?.provider"
       :review-list-added="store.reportData?.reviewListAdded"
-      :review-list-source="store.reportData?.reviewListSource"
       :review-adding="reviewAdding"
       :show-review-action="Boolean(store.reportData?.reportId)"
       @close="drawerOpen = false"
       @restart="handleRestart"
       @add-review="addCurrentReportToReviewList"
+    />
+    <KnowledgeCardDialog
+      :open="knowledgeCardOpen"
+      :card="knowledgeCard"
+      :fallback-name="store.kpName"
+      :loading="knowledgeCardLoading"
+      :error="knowledgeCardError"
+      :show-favorite="false"
+      primary-label="继续复习"
+      footer-text="对照知识卡片，重新组织自己的讲解。"
+      @close="knowledgeCardOpen = false"
+      @retry="openKnowledgeCard"
+      @primary="knowledgeCardOpen = false"
     />
   </div>
 </template>
@@ -323,6 +376,9 @@ function continueLearning() {
 }
 .header-copy p { margin: 4px 0 0; color: #8290a6; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-mode { flex: none; padding: 4px 8px; border-radius: 7px; background: #eef4ff; color: #2861d5; font-size: 11px; font-weight: 650; }
+.header-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.knowledge-card-button { padding: 7px 11px; border: 1px solid #cfddf4; border-radius: 9px; background: #f6f9ff; color: #315fc4; font-size: 12px; font-weight: 650; }
+.knowledge-card-button:hover { border-color: #9eb8ea; background: #eaf1ff; }
 .header-switch { flex: none; background: transparent; color: #60728f; font-size: 12px; border: 0; }
 .header-switch:hover { color: #265ce0; }
 

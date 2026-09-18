@@ -242,8 +242,10 @@ class KnowledgeGapService:
             )
             if due_date <= today:
                 gaps.append(gap)
-        gaps.sort(key=lambda gap: (-gap.severity, gap.next_review_at))
-        items = [KnowledgeGapService._gap_to_dict(gap) for gap in gaps]
+        grouped: dict[str, list[KnowledgeGap]] = {}
+        for gap in gaps:
+            grouped.setdefault(gap.kp_id, []).append(gap)
+
         active = session.exec(select(ReviewAttempt).where(
             ReviewAttempt.user_id == user_id,
             ReviewAttempt.status == "active",
@@ -253,9 +255,22 @@ class KnowledgeGapService:
             for attempt in active
             for gap_id in json.loads(attempt.target_gap_ids or "[]")
         }
-        for item in items:
-            item["active_review_id"] = active_by_gap.get(item["gap_id"])
+        items = []
+        for kp_gaps in grouped.values():
+            focus = min(
+                kp_gaps,
+                key=lambda gap: (gap.score, -gap.severity, gap.next_review_at or ""),
+            )
+            item = KnowledgeGapService._gap_to_dict(focus)
+            item["dimension_count"] = len(kp_gaps)
+            item["target_dimensions"] = [gap.dimension for gap in kp_gaps]
+            item["active_review_id"] = next(
+                (active_by_gap[gap.id] for gap in kp_gaps if gap.id in active_by_gap),
+                None,
+            )
             item["action"] = "continue" if item["active_review_id"] else "start"
+            items.append(item)
+        items.sort(key=lambda item: (-item["severity"], item["next_review_at"] or ""))
         return {
             "items": items,
             "total": len(items),
@@ -265,7 +280,7 @@ class KnowledgeGapService:
 
     @staticmethod
     def get_gap_stats(session: Session, user_id: str) -> Dict[str, Any]:
-        """按状态和维度统计用户的漏洞数量[cite: 1, 3]"""
+        """Count knowledge points per status while retaining dimension totals."""
         # 查询该用户的所有漏洞
         statement = select(KnowledgeGap).where(KnowledgeGap.user_id == user_id)
         gaps = session.exec(statement).all()
@@ -278,11 +293,12 @@ class KnowledgeGapService:
             "结构化能力": 0,
         }
 
-        total = len(gaps)
+        kp_ids = set()
+        kp_ids_by_status = {status: set() for status in by_status}
         for gap in gaps:
-            # 统计按状态分布
+            kp_ids.add(gap.kp_id)
             if gap.status in by_status:
-                by_status[gap.status] += 1
+                kp_ids_by_status[gap.status].add(gap.kp_id)
             # 统计按维度分布
             if gap.dimension in by_dimension:
                 by_dimension[gap.dimension] += 1
@@ -290,8 +306,11 @@ class KnowledgeGapService:
                 by_dimension[gap.dimension] = 1
 
         return {
-            "total": total,
-            "by_status": by_status,
+            "total": len(kp_ids),
+            "by_status": {
+                status: len(status_kp_ids)
+                for status, status_kp_ids in kp_ids_by_status.items()
+            },
             "by_dimension": by_dimension,
         }
 

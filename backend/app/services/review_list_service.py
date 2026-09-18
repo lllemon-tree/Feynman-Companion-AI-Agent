@@ -1,36 +1,34 @@
-"""Knowledge-point-level review list, independent from dimension gap records."""
+"""Enroll report dimensions in the canonical knowledge-gap review queue."""
 
+import json
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from fastapi import HTTPException
-from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend.app.models.diagnostic_report import DiagnosticReport
-from backend.app.models.learning import (
-    KnowledgeReviewItem,
-    KnowledgeReviewItemData,
-    KnowledgeReviewListData,
+from backend.app.models.feynman import DimensionReport
+from backend.app.models.knowledge_gap import (
+    KnowledgeGap,
+    ReportReviewEnrollmentData,
 )
+from backend.app.services.review_rules import is_mastered, severity_for_score
 
 
-AUTO_REVIEW_AVERAGE_THRESHOLD = 6.0
+def _dimensions_for_review(report: DiagnosticReport) -> list[DimensionReport]:
+    try:
+        dimensions = [
+            DimensionReport.model_validate(item)
+            for item in json.loads(report.dimensions)
+        ]
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="诊断报告缺少有效的维度数据") from exc
 
+    if not dimensions:
+        raise HTTPException(status_code=409, detail="诊断报告缺少有效的维度数据")
 
-def _to_data(item: KnowledgeReviewItem) -> KnowledgeReviewItemData:
-    return KnowledgeReviewItemData(
-        review_item_id=item.id,
-        kp_id=item.kp_id,
-        kp_name=item.kp_name,
-        material_id=item.material_id,
-        material_name=item.material_name,
-        report_id=item.report_id,
-        source=item.source,
-        status=item.status,
-        average_score=item.average_score,
-        created_at=item.created_at,
-    )
+    unmastered = [item for item in dimensions if not is_mastered(item.score)]
+    return unmastered or [min(dimensions, key=lambda item: item.score)]
 
 
 def add_report_to_review_list(
@@ -38,85 +36,64 @@ def add_report_to_review_list(
     user_id: str,
     report_id: str,
     source: str = "manual",
-) -> KnowledgeReviewItemData:
+) -> ReportReviewEnrollmentData:
+    del source  # The knowledge-gap queue is now the single source of truth.
     report = db.exec(select(DiagnosticReport).where(
         DiagnosticReport.id == report_id,
         DiagnosticReport.user_id == user_id,
     )).first()
     if report is None:
         raise HTTPException(status_code=404, detail="诊断报告不存在")
-    return upsert_review_item(db, report, source)
 
+    selected = _dimensions_for_review(report)
+    now = datetime.now(timezone.utc).isoformat()
+    statuses: list[str] = []
 
-def upsert_review_item(
-    db: Session,
-    report: DiagnosticReport,
-    source: str,
-) -> KnowledgeReviewItemData:
-    existing = db.exec(select(KnowledgeReviewItem).where(
-        KnowledgeReviewItem.user_id == report.user_id,
-        KnowledgeReviewItem.kp_id == report.kp_id,
-    )).first()
-    average = round(report.total_score / 4, 1)
-    now = datetime.now(timezone.utc)
-    if existing is None:
-        existing = KnowledgeReviewItem(
-            id=f"review-item-{uuid4().hex[:12]}",
-            user_id=report.user_id,
-            kp_id=report.kp_id,
-            kp_name=report.kp_name,
-            material_id=report.material_id,
-            material_name=report.material_name,
-            report_id=report.id,
-            source="automatic" if source == "automatic" else "manual",
-            status="pending",
-            average_score=average,
-        )
-    else:
-        existing.report_id = report.id
-        existing.average_score = average
-        existing.kp_name = report.kp_name
-        existing.material_id = report.material_id
-        existing.material_name = report.material_name
-        existing.status = "pending"
-        existing.updated_at = now
-    db.add(existing)
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        winner = db.exec(select(KnowledgeReviewItem).where(
-            KnowledgeReviewItem.user_id == report.user_id,
-            KnowledgeReviewItem.kp_id == report.kp_id,
-        )).first()
-        if winner is None:
-            raise
-        return _to_data(winner)
-    db.refresh(existing)
-    return _to_data(existing)
+    for dimension in selected:
+        gap = db.exec(select(KnowledgeGap).where(
+            KnowledgeGap.user_id == user_id,
+            KnowledgeGap.kp_id == report.kp_id,
+            KnowledgeGap.dimension == dimension.name,
+        ).order_by(KnowledgeGap.created_at.desc())).first()
 
+        if gap is None:
+            gap = KnowledgeGap(
+                user_id=user_id,
+                kp_id=report.kp_id,
+                kp_name=report.kp_name,
+                material_id=report.material_id,
+                material_name=report.material_name,
+                dimension=dimension.name,
+                score=dimension.score,
+                severity=severity_for_score(dimension.score),
+                status="open",
+                gap_description=dimension.analysis,
+                source_session_id=report.session_id,
+                next_review_at=now,
+            )
+        else:
+            gap.kp_name = report.kp_name
+            gap.material_id = report.material_id
+            gap.material_name = report.material_name
+            gap.score = dimension.score
+            gap.severity = severity_for_score(dimension.score)
+            gap.gap_description = dimension.analysis
+            gap.source_session_id = report.session_id
+            gap.updated_at = now
+            if gap.status != "reviewing":
+                gap.status = "open"
+                gap.next_review_at = now
+                gap.resolved_at = None
+                gap.resolution_source = None
 
-def maybe_auto_add_report(
-    db: Session, report: DiagnosticReport
-) -> KnowledgeReviewItemData | None:
-    if report.total_score / 4 >= AUTO_REVIEW_AVERAGE_THRESHOLD:
-        return None
-    return upsert_review_item(db, report, "automatic")
+        statuses.append(gap.status)
+        db.add(gap)
 
-
-def get_review_item_for_kp(
-    db: Session, user_id: str, kp_id: str
-) -> KnowledgeReviewItemData | None:
-    item = db.exec(select(KnowledgeReviewItem).where(
-        KnowledgeReviewItem.user_id == user_id,
-        KnowledgeReviewItem.kp_id == kp_id,
-    )).first()
-    return _to_data(item) if item else None
-
-
-def list_review_items(db: Session, user_id: str) -> KnowledgeReviewListData:
-    items = db.exec(select(KnowledgeReviewItem).where(
-        KnowledgeReviewItem.user_id == user_id,
-        KnowledgeReviewItem.status == "pending",
-    ).order_by(KnowledgeReviewItem.updated_at.desc())).all()
-    return KnowledgeReviewListData(items=[_to_data(item) for item in items], total=len(items))
+    db.commit()
+    return ReportReviewEnrollmentData(
+        report_id=report.id,
+        kp_id=report.kp_id,
+        kp_name=report.kp_name,
+        status="reviewing" if statuses and all(item == "reviewing" for item in statuses) else "open",
+        dimensions=[item.name for item in selected],
+    )

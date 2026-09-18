@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from backend.app.models.diagnostic_report import DiagnosticReport
 from backend.app.models.feynman import DimensionReport, FeynmanChatData
+from backend.app.models.knowledge import LearnSession
 from backend.app.models.knowledge_gap import KnowledgeGap
 from backend.app.models.review_attempt import ReviewAttempt
 from backend.app.services.review_rules import is_mastered, next_review_at, severity_for_score
@@ -49,6 +50,36 @@ def _target_payload(db: Session, attempt: ReviewAttempt) -> list[dict]:
     ]
 
 
+def _ensure_learning_session(
+    db: Session,
+    attempt: ReviewAttempt,
+    representative_gap: KnowledgeGap | None = None,
+) -> LearnSession:
+    existing = db.get(LearnSession, attempt.session_id)
+    if existing is not None:
+        return existing
+    gap = representative_gap
+    if gap is None:
+        gap = next(
+            (
+                candidate
+                for gap_id in _target_ids(attempt)
+                if (candidate := db.get(KnowledgeGap, gap_id)) is not None
+                and candidate.user_id == attempt.user_id
+            ),
+            None,
+        )
+    learning_session = LearnSession(
+        id=attempt.session_id,
+        user_id=attempt.user_id,
+        kp_id=attempt.kp_id,
+        kp_name=gap.kp_name if gap is not None else attempt.kp_id,
+        material_id=gap.material_id if gap is not None else None,
+    )
+    db.add(learning_session)
+    return learning_session
+
+
 def start_review(db: Session, user_id: str, kp_id: str, source: str) -> dict:
     existing = db.exec(select(ReviewAttempt).where(
         ReviewAttempt.user_id == user_id,
@@ -56,6 +87,8 @@ def start_review(db: Session, user_id: str, kp_id: str, source: str) -> dict:
         ReviewAttempt.status == "active",
     )).first()
     if existing is not None:
+        _ensure_learning_session(db, existing)
+        db.commit()
         return _start_payload(db, existing, resumed=True)
 
     gaps = db.exec(select(KnowledgeGap).where(
@@ -80,6 +113,7 @@ def start_review(db: Session, user_id: str, kp_id: str, source: str) -> dict:
         source=source,
     )
     db.add(attempt)
+    _ensure_learning_session(db, attempt, gaps[0])
     for gap in gaps:
         gap.status = "reviewing"
         gap.updated_at = attempt.started_at
@@ -95,6 +129,8 @@ def start_review(db: Session, user_id: str, kp_id: str, source: str) -> dict:
         )).first()
         if winner is None:
             raise
+        _ensure_learning_session(db, winner)
+        db.commit()
         return _start_payload(db, winner, resumed=True)
     return _start_payload(db, attempt, resumed=False)
 

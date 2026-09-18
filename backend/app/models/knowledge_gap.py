@@ -103,6 +103,22 @@ class KnowledgeGapUpdate(SQLModel):
     )
 
 
+class ReportReviewEnrollmentData(SQLModel):
+    """Result of adding one diagnostic report to the review queue."""
+
+    report_id: str
+    kp_id: str
+    kp_name: str
+    status: Literal["open", "reviewing"]
+    dimensions: list[str]
+
+
+class ReportReviewEnrollmentResponse(SQLModel):
+    code: int = 200
+    msg: str = "success"
+    data: ReportReviewEnrollmentData
+
+
 class KnowledgeGapResponse(KnowledgeGapBase):
     """漏洞标准单条响应数据模型"""
 

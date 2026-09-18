@@ -173,6 +173,7 @@ export const useChatStore = defineStore('chat', {
           this.streamStatus = text
         })
         await this.handleAgentResponse(data, pending.id)
+        window.dispatchEvent(new Event('feynman:sessions-updated'))
         return data
       } catch (e) {
         // 若服务端已保存而终止事件在网络中丢失，先恢复历史，避免重试产生重复讲解。

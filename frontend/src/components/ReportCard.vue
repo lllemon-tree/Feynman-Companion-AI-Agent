@@ -7,7 +7,6 @@ const props = defineProps({
   provider: { type: String, default: null },
   fallbackUsed: { type: Boolean, default: false },
   reviewListAdded: { type: Boolean, default: false },
-  reviewListSource: { type: String, default: null },
   reviewAdding: { type: Boolean, default: false },
   showReviewAction: { type: Boolean, default: true }
 })
@@ -25,6 +24,23 @@ const isLimited = computed(() => props.fallbackUsed || props.provider === 'mock'
 <template>
   <article class="report-card" role="button" tabindex="0" @click="$emit('click')" @keydown.enter="$emit('click')">
     <span class="eyebrow"><span class="status-dot"></span> 本轮讲解完成 · {{ isLimited ? '降级诊断' : '诊断已生成' }}</span>
+    <button
+      v-if="showReviewAction"
+      type="button"
+      class="review-icon-button"
+      :class="{ 'review-icon-button--added': reviewListAdded }"
+      :disabled="reviewListAdded || reviewAdding"
+      :aria-label="reviewListAdded ? '已加入待复习' : '加入待复习'"
+      :title="reviewListAdded ? '已加入待复习' : '加入待复习'"
+      @click.stop="$emit('add-review')"
+    >
+      <span v-if="reviewAdding" class="review-icon-spinner" aria-hidden="true"></span>
+      <svg v-else width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+        <path d="M6 4.75A1.75 1.75 0 0 1 7.75 3h8.5A1.75 1.75 0 0 1 18 4.75V21l-6-3.5L6 21V4.75Z" />
+        <path v-if="reviewListAdded" d="m9 10 2 2 4-4" />
+        <path v-else d="M12 7v6M9 10h6" />
+      </svg>
+    </button>
     <div class="report-main">
       <div class="score-box">
         <strong>{{ averageScore }}</strong><span>/ 10</span>
@@ -41,22 +57,12 @@ const isLimited = computed(() => props.fallbackUsed || props.provider === 'mock'
     </div>
     <div class="report-footer">
       <span class="report-hint">{{ isLimited ? '本轮未使用正式模型评估，分数仅供流程演示，请勿当作真实掌握度。' : '打开报告，逐项查看讲对的内容、原话证据、待补强点与复习路径' }}</span>
-      <button
-        v-if="showReviewAction"
-        type="button"
-        class="review-button"
-        :class="{ 'review-button--added': reviewListAdded }"
-        :disabled="reviewListAdded || reviewAdding"
-        @click.stop="$emit('add-review')"
-      >
-        {{ reviewListAdded ? (reviewListSource === 'automatic' ? '低于6分，已自动加入复习列表' : '已加入复习列表') : (reviewAdding ? '正在添加…' : '添加到复习列表') }}
-      </button>
     </div>
   </article>
 </template>
 
 <style scoped>
-.report-card { display: block; width: calc(100% - 43px); margin-left: 43px; padding: 19px 21px; border: 1px solid #dce7f8; border-radius: 15px; background: linear-gradient(125deg, #f7faff, #fff 58%); color: #1d2d49; text-align: left; box-shadow: 0 7px 25px rgba(31, 77, 161, .06); cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.report-card { position: relative; display: block; width: calc(100% - 43px); margin-left: 43px; padding: 19px 58px 19px 21px; border: 1px solid #dce7f8; border-radius: 15px; background: linear-gradient(125deg, #f7faff, #fff 58%); color: #1d2d49; text-align: left; box-shadow: 0 7px 25px rgba(31, 77, 161, .06); cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
 .report-card:hover { border-color: #a9c3f2; transform: translateY(-1px); box-shadow: 0 10px 28px rgba(31, 77, 161, .1); }
 .report-card:focus-visible { outline: 3px solid #a6c2fb; outline-offset: 3px; }
 .eyebrow { display: inline-flex; align-items: center; gap: 7px; color: #3c67c4; font-size: 11px; font-weight: 750; letter-spacing: .03em; }
@@ -74,17 +80,20 @@ const isLimited = computed(() => props.fallbackUsed || props.provider === 'mock'
 .report-arrow { display: grid; place-items: center; flex: none; width: 27px; height: 27px; border-radius: 50%; background: #e7efff; color: #3264d6; font-size: 19px; }
 .report-footer { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-top: 10px; border-top: 1px solid #e6edf7; }
 .report-hint { display: block; min-width: 0; color: #8b9aaf; font-size: 11px; }
-.review-button { flex: none; padding: 7px 11px; border-radius: 8px; background: #eaf1ff; color: #285fcf; font-size: 11px; font-weight: 650; cursor: pointer; }
-.review-button:hover:not(:disabled) { background: #dce8ff; }
-.review-button--added { background: #edf8f3; color: #27815f; cursor: default; }
+.review-icon-button { position: absolute; top: 14px; right: 17px; display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid #d7e3f7; border-radius: 10px; background: #f4f7ff; color: #315fc4; cursor: pointer; transition: background-color .15s, border-color .15s, color .15s; }
+.review-icon-button:hover:not(:disabled) { border-color: #9db8eb; background: #e7efff; color: #204fae; }
+.review-icon-button:focus-visible { outline: 3px solid #a6c2fb; outline-offset: 2px; }
+.review-icon-button--added { border-color: #cfe8dc; background: #edf8f3; color: #27815f; cursor: default; }
+.review-icon-spinner { width: 15px; height: 15px; border: 2px solid #b8c8e8; border-top-color: #315fc4; border-radius: 50%; animation: review-spin .7s linear infinite; }
+@keyframes review-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .review-icon-spinner { animation: none; } }
 @media (max-width: 680px) {
-  .report-card { width: 100%; margin-left: 0; padding: 16px; }
+  .report-card { width: 100%; margin-left: 0; padding: 16px 54px 16px 16px; }
   .report-main { gap: 13px; }
   .score-box { min-width: 85px; padding-right: 12px; }
   .score-box strong { font-size: 28px; }
   .score-box small { display: none; }
   .report-arrow { display: none; }
   .report-footer { align-items: flex-start; flex-direction: column; }
-  .review-button { width: 100%; }
 }
 </style>

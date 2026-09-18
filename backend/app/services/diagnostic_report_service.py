@@ -33,11 +33,10 @@ from backend.app.models.feynman import (
     ReviewPlan,
 )
 from backend.app.models.knowledge import Material
-from backend.app.models.learning import KnowledgeReviewItem
+from backend.app.models.knowledge_gap import KnowledgeGap
 from backend.app.models.review_attempt import ReviewAttempt
 from backend.app.services.review_rules import is_mastered, next_review_at, severity_for_score
 from backend.app.services.review_service import finalize_review
-from backend.app.services.review_list_service import maybe_auto_add_report
 from backend.app.services.session_store import SessionState
 
 
@@ -218,14 +217,14 @@ class DiagnosticReportFinalizer:
                 response,
                 material_name,
             )
-            return self._auto_enroll(report)
+            return report
 
         with Session(self._engine) as db:
             existing = db.exec(select(DiagnosticReport).where(
                 DiagnosticReport.session_id == context.session_id
             )).first()
             if existing is not None:
-                return self._auto_enroll(existing)
+                return existing
         try:
             gaps_identified = self._gap_writer.sync(
                 self._engine,
@@ -244,26 +243,16 @@ class DiagnosticReportFinalizer:
             response=response,
             gaps_identified=gaps_identified,
         )
-        return self._auto_enroll(report)
-
-    def _auto_enroll(
-        self, report: Optional[DiagnosticReport]
-    ) -> Optional[DiagnosticReport]:
-        if report is None:
-            return None
-        with Session(self._engine) as db:
-            attached = db.get(DiagnosticReport, report.id)
-            if attached is not None:
-                maybe_auto_add_report(db, attached)
         return report
 
     def review_list_metadata(self, report: DiagnosticReport) -> tuple[bool, Optional[str]]:
         with Session(self._engine) as db:
-            item = db.exec(select(KnowledgeReviewItem).where(
-                KnowledgeReviewItem.user_id == report.user_id,
-                KnowledgeReviewItem.kp_id == report.kp_id,
+            active_gap = db.exec(select(KnowledgeGap).where(
+                KnowledgeGap.user_id == report.user_id,
+                KnowledgeGap.kp_id == report.kp_id,
+                KnowledgeGap.status.in_(["open", "reviewing"]),
             )).first()
-        return item is not None, item.source if item else None
+        return active_gap is not None, None
 
     def _get_material_name(self, material_id: Optional[str]) -> Optional[str]:
         if material_id is None:
@@ -331,17 +320,21 @@ def list_reports(
     user_id: str,
     page: int,
     page_size: int,
+    kp_id: Optional[str] = None,
 ) -> ReportListData:
+    filters = [DiagnosticReport.user_id == user_id]
+    if kp_id:
+        filters.append(DiagnosticReport.kp_id == kp_id)
     total = int(
         db.exec(
             select(func.count())
             .select_from(DiagnosticReport)
-            .where(DiagnosticReport.user_id == user_id)
+            .where(*filters)
         ).one()
     )
     records = db.exec(
         select(DiagnosticReport)
-        .where(DiagnosticReport.user_id == user_id)
+        .where(*filters)
         .order_by(DiagnosticReport.created_at.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -367,9 +360,10 @@ def get_report_detail(
     ).first()
     if record is None:
         return None
-    review_item = db.exec(select(KnowledgeReviewItem).where(
-        KnowledgeReviewItem.user_id == user_id,
-        KnowledgeReviewItem.kp_id == record.kp_id,
+    active_gap = db.exec(select(KnowledgeGap).where(
+        KnowledgeGap.user_id == user_id,
+        KnowledgeGap.kp_id == record.kp_id,
+        KnowledgeGap.status.in_(["open", "reviewing"]),
     )).first()
     return ReportDetailData(
         report_id=record.id,
@@ -382,8 +376,8 @@ def get_report_detail(
         overall_comment=record.overall_comment,
         gaps_identified=record.gaps_identified,
         review_plan=_parse_review_plan(record.review_plan),
-        review_list_added=review_item is not None,
-        review_list_source=review_item.source if review_item else None,
+        review_list_added=active_gap is not None,
+        review_list_source=None,
         created_at=record.created_at,
     )
 
