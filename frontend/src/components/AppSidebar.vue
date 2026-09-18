@@ -2,7 +2,8 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/authStore'
-import { listConversations } from '@/api/feynman'
+import { getSessionList, listConversations } from '@/api/feynman'
+import { historyModeForPath, normalizeHistoryItems } from '@/utils/sidebarHistory'
 import AppIcon from './AppIcon.vue'
 
 const route = useRoute()
@@ -14,6 +15,7 @@ const profileDropdownOpen = ref(false)
 const profileDropdownRef = ref(null)
 const isGuest = computed(() => !authStore.isLoggedIn && localStorage.getItem('feynman_guest') === 'true')
 const displayName = computed(() => isGuest.value ? '访客' : (authStore.username || '同学'))
+const historyMode = computed(() => historyModeForPath(route.path))
 const navigation = [
   { label: '学习对话', icon: 'chat', to: '/home', paths: ['/home'] },
   { label: '我的教材', icon: 'book', to: '/upload', paths: ['/upload', '/knowledge'] },
@@ -28,12 +30,18 @@ function active(item) {
     : item.paths.includes(route.path)
 }
 async function refreshConversations() {
-  if (isGuest.value) {
+  const mode = historyMode.value
+  if (isGuest.value || !mode) {
     conversations.value = []
     return
   }
-  try { conversations.value = await listConversations() }
-  catch { conversations.value = [] }
+  try {
+    const records = mode === 'knowledge' ? await getSessionList() : await listConversations()
+    if (historyMode.value === mode) conversations.value = normalizeHistoryItems(mode, records)
+  }
+  catch {
+    if (historyMode.value === mode) conversations.value = []
+  }
 }
 function navigate(to) {
   if (!window.dispatchEvent(new Event('feynman:before-navigate', { cancelable: true }))) return
@@ -66,22 +74,30 @@ function closeProfileDropdown(e) {
     profileDropdownOpen.value = false
   }
 }
-function openConversation(id) {
+function openConversation(conversation) {
   if (!window.dispatchEvent(new Event('feynman:before-navigate', { cancelable: true }))) return
   open.value = false
-  router.push({ path: '/home', query: { conversation: id } })
+  router.push(conversation.route)
 }
-watch(() => route.path, path => {
+function isActiveConversation(conversation) {
+  return (
+    (route.path === '/home' && conversation.id === route.query.conversation) ||
+    (route.path === '/study' && conversation.id === route.query.sessionId)
+  )
+}
+watch(() => route.path, () => {
   open.value = false
-  if (path === '/home') refreshConversations()
+  refreshConversations()
 })
 onMounted(() => {
   refreshConversations()
   window.addEventListener('feynman:conversations-updated', refreshConversations)
+  window.addEventListener('feynman:sessions-updated', refreshConversations)
   document.addEventListener('click', closeProfileDropdown)
 })
 onUnmounted(() => {
   window.removeEventListener('feynman:conversations-updated', refreshConversations)
+  window.removeEventListener('feynman:sessions-updated', refreshConversations)
   document.removeEventListener('click', closeProfileDropdown)
 })
 defineExpose({ openMenu: () => { open.value = true } })
@@ -101,13 +117,13 @@ defineExpose({ openMenu: () => { open.value = true } })
         <AppIcon :name="item.icon" :size="19" /><span>{{ item.label }}</span>
       </button>
     </nav>
-    <div class="history">
+    <div v-if="historyMode" class="history">
       <div class="section-title">最近对话</div>
       <div v-if="conversations.length" class="history-list">
         <button v-for="conversation in conversations" :key="conversation.id" type="button"
           class="history-item"
-          :class="{ 'history-item--active': route.path === '/home' && conversation.id === route.query.conversation }"
-          :title="conversation.title" @click="openConversation(conversation.id)">
+          :class="{ 'history-item--active': isActiveConversation(conversation) }"
+          :title="conversation.title" @click="openConversation(conversation)">
           <AppIcon name="chat" :size="16" /><span>{{ conversation.title }}</span>
         </button>
       </div>

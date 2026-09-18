@@ -16,6 +16,7 @@ from backend.app.main import app
 from backend.app.models.auth import User
 from backend.app.models.diagnostic_report import DiagnosticReport
 from backend.app.models.feynman import CardPreview, DimensionReport, FinalReport, FeynmanChatData, NextAction
+from backend.app.models.knowledge import LearnSession
 from backend.app.models.knowledge_gap import KnowledgeGap
 from backend.app.models.review_attempt import ReviewAttempt
 from backend.app.services.diagnostic_report_service import DiagnosticReportFinalizer
@@ -135,6 +136,17 @@ class Week9ReviewLoopTest(unittest.TestCase):
         ).json()["data"]
         self.assertEqual(active["action"], "continue")
         self.assertEqual(active["dimension_changes"], [])
+
+    def test_start_creates_restorable_learning_session(self):
+        data = self._start().json()["data"]
+
+        with Session(self.engine) as db:
+            learning_session = db.get(LearnSession, data["session_id"])
+
+        self.assertIsNotNone(learning_session)
+        self.assertEqual(learning_session.user_id, "review-user")
+        self.assertEqual(learning_session.kp_id, "kp-review")
+        self.assertEqual(learning_session.kp_name, "复习知识点")
 
     def test_completion_is_atomic_idempotent_and_compares_baseline(self):
         data = self._start().json()["data"]

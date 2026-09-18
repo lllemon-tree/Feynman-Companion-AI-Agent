@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
@@ -25,11 +25,12 @@ def report_list(
     db: Annotated[Session, Depends(get_session)],
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    kp_id: Annotated[Optional[str], Query()] = None,
 ):
     return ReportListResponse(
         code=200,
         msg="success",
-        data=list_reports(db, actor.user_id, page, page_size),
+        data=list_reports(db, actor.user_id, page, page_size, kp_id=kp_id),
     )
 
 

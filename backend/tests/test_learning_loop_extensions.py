@@ -16,7 +16,6 @@ from backend.app.models.learning import (
     FavoriteCollectionCreateRequest,
     KnowledgeCard,
     KnowledgeCardFavorite,
-    KnowledgeReviewItem,
 )
 from backend.app.services.card_favorite_service import (
     add_favorite,
@@ -33,10 +32,6 @@ from backend.app.services.knowledge_card_service import (
 )
 from backend.app.services.material_service import get_material_tree_from_db
 from backend.app.services.mock_llm import MockLLMClient
-from backend.app.services.review_list_service import (
-    add_report_to_review_list,
-    maybe_auto_add_report,
-)
 from backend.app.services.session_store import InMemorySessionStore
 
 
@@ -143,20 +138,6 @@ class LearningLoopExtensionsTest(unittest.TestCase):
         self.assertEqual(enhanced.generation_status, "ready")
         self.assertEqual(enhanced.version, 2)
 
-    def test_review_threshold_and_manual_add_are_idempotent(self):
-        with Session(self.engine) as db:
-            low = self._report("rpt-low", 23)
-            db.add(low)
-            db.commit()
-            auto = maybe_auto_add_report(db, low)
-            again = add_report_to_review_list(db, "user-a", low.id, "manual")
-            count = len(db.exec(select(KnowledgeReviewItem)).all())
-
-        self.assertIsNotNone(auto)
-        self.assertEqual(auto.source, "automatic")
-        self.assertEqual(again.review_item_id, auto.review_item_id)
-        self.assertEqual(count, 1)
-
     def test_favorite_card_supports_folders_tags_notes_and_search(self):
         settings = SimpleNamespace(llm_provider="mock", deepseek_configured=False)
         with Session(self.engine) as db, patch(
@@ -211,15 +192,6 @@ class LearningLoopExtensionsTest(unittest.TestCase):
         self.assertEqual(after_folder_delete.items[0].collection_ids, [])
         self.assertFalse(status.is_favorited)
         self.assertEqual(remaining, 0)
-
-    def test_exactly_six_does_not_auto_add(self):
-        with Session(self.engine) as db:
-            report = self._report("rpt-six", 24)
-            db.add(report)
-            db.commit()
-            result = maybe_auto_add_report(db, report)
-
-        self.assertIsNone(result)
 
     def test_user_can_finish_after_one_explanation_without_fake_user_turn(self):
         store = InMemorySessionStore()

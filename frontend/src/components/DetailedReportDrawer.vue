@@ -11,7 +11,6 @@ const props = defineProps({
   loading: { type: Boolean, default: false },
   showReviewAction: { type: Boolean, default: false },
   reviewListAdded: { type: Boolean, default: false },
-  reviewListSource: { type: String, default: null },
   reviewAdding: { type: Boolean, default: false }
 })
 const emit = defineEmits(['close', 'restart', 'add-review'])
@@ -101,7 +100,7 @@ onBeforeUnmount(() => {
                 :disabled="reviewListAdded || reviewAdding"
                 @click="$emit('add-review')"
               >
-                {{ reviewListAdded ? (reviewListSource === 'automatic' ? '低于6分，已自动加入复习列表' : '已加入复习列表') : (reviewAdding ? '正在添加…' : '添加到复习列表') }}
+                {{ reviewListAdded ? '已加入待复习' : (reviewAdding ? '正在添加…' : '加入待复习') }}
               </button>
             </div>
           </section>
