@@ -18,7 +18,7 @@ const pageTitle = computed(() => ({
   profile: '个人主页',
   gaps: '复习计划',
   sessions: '教材讲解记录',
-  reports: '学习报告',
+  reports: '学习历史',
   materials: '我的教材',
   favorites: '知识收藏'
 }[activeTab.value] || '个人主页'))
@@ -207,6 +207,10 @@ const reportDetailLoading = ref(false)
 const reportReviewAdding = ref(false)
 const reportOpeningKpId = ref('')
 
+// 学习历史：历史报告 + 历史会话合并后的时间轴卡片
+const historyCards = ref([])
+const loadingHistory = ref(false)
+
 // 我的教材
 const materials = ref([])
 const loadingMaterials = ref(false)
@@ -352,6 +356,79 @@ async function loadReports() {
   }
 }
 
+/**
+ * 学习历史：合并历史报告与历史会话（仅组合现有两个接口的数据，不新增接口）
+ * 配对规则（sessions 无 kp_id）：同一 kp_name 下按 created_at 时间差最近配对，
+ * 每个会话最多配给一个报告；未配对的会话仍单独生成卡片。
+ */
+async function loadHistory() {
+  if (!isLoggedIn.value) return
+  loadingHistory.value = true
+  try {
+    const [sessionListData, reportsData] = await Promise.all([
+      getSessionList(),
+      getReports()
+    ])
+    const sessionList = sessionListData || []
+    const reportList = reportsData.items || []
+    reports.value = reportList
+
+    const candidates = []
+    reportList.forEach((report, ri) => {
+      sessionList.forEach((session, si) => {
+        if (session.kp_name !== report.kp_name) return
+        const delta = Math.abs(new Date(session.created_at) - new Date(report.created_at))
+        candidates.push({ ri, si, delta })
+      })
+    })
+    candidates.sort((a, b) => a.delta - b.delta)
+
+    const reportSession = new Map()
+    const usedSessions = new Set()
+    for (const candidate of candidates) {
+      if (reportSession.has(candidate.ri) || usedSessions.has(candidate.si)) continue
+      reportSession.set(candidate.ri, candidate.si)
+      usedSessions.add(candidate.si)
+    }
+
+    const cards = reportList.map((report, ri) => {
+      const sessionIndex = reportSession.get(ri)
+      const session = sessionIndex !== undefined ? sessionList[sessionIndex] : null
+      return {
+        key: `report-${report.report_id}`,
+        kp_name: report.kp_name,
+        material_name: report.material_name,
+        created_at: report.created_at,
+        total_score: report.total_score,
+        dimensions: report.dimensions || [],
+        report,
+        session
+      }
+    })
+
+    sessionList.forEach((session, si) => {
+      if (usedSessions.has(si)) return
+      cards.push({
+        key: `session-${session.session_id}`,
+        kp_name: session.kp_name,
+        material_name: session.material_title,
+        created_at: session.created_at,
+        total_score: null,
+        dimensions: [],
+        report: null,
+        session
+      })
+    })
+
+    cards.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    historyCards.value = cards
+  } catch (e) {
+    historyCards.value = []
+  } finally {
+    loadingHistory.value = false
+  }
+}
+
 async function viewReportDetail(report) {
   selectedReport.value = report
   showReportDetail.value = true
@@ -443,7 +520,7 @@ function handleTabChange(key) {
   } else if (key === 'sessions') {
     loadSessions()
   } else if (key === 'reports') {
-    loadReports()
+    loadHistory()
   } else if (key === 'materials') {
     loadMaterials()
   }
@@ -507,7 +584,7 @@ onMounted(() => {
   } else if (activeTab.value === 'sessions') {
     loadSessions()
   } else if (activeTab.value === 'reports') {
-    loadReports()
+    loadHistory()
   } else if (activeTab.value === 'materials') {
     loadMaterials()
   }
@@ -523,7 +600,7 @@ onActivated(() => {
       loadGaps()
       loadReviewDueGaps(false)
     } else if (activeTab.value === 'reports') {
-      loadReports()
+      loadHistory()
     }
   }
 })
@@ -531,7 +608,7 @@ onActivated(() => {
 
 <template>
   <div class="profile-page">
-    <header class="profile-header">
+    <header v-if="activeTab !== 'reports'" class="profile-header">
       <h1 class="page-title">{{ pageTitle }}</h1>
     </header>
 
@@ -995,9 +1072,9 @@ onActivated(() => {
         </div>
       </div>
 
-      <!-- 历史报告 Tab -->
+      <!-- 学习历史 Tab（历史报告 + 历史会话） -->
       <div v-if="activeTab === 'reports'" class="tab-content">
-        <div v-if="loading" class="loading-state">
+        <div v-if="loadingHistory" class="loading-state">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spinner">
             <circle cx="12" cy="12" r="10" stroke-linecap="round" stroke-dasharray="16 16" />
           </svg>
@@ -1013,65 +1090,170 @@ onActivated(() => {
               <line x1="6" y1="20" x2="6" y2="14" />
             </svg>
           </div>
-          <p>登录后查看历史报告</p>
+          <p>登录后查看学习历史</p>
           <button class="upload-btn" @click="router.push('/login')">
             去登录
           </button>
         </div>
 
         <!-- 空状态 -->
-        <div v-else-if="reports.length === 0" class="empty-state">
+        <div v-else-if="historyCards.length === 0" class="empty-state">
           <div class="empty-icon">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
             </svg>
           </div>
-          <p>暂无历史报告，快去选择一个知识点开始讲解吧</p>
+          <p>暂无学习历史，快去选择一个知识点开始费曼学习吧</p>
           <button class="start-btn" @click="router.push('/select')">
             开始学习
           </button>
         </div>
 
-        <!-- 报告列表 -->
-        <div v-else class="reports-list">
-          <div
-            v-for="report in reports"
-            :key="report.report_id"
-            class="report-card"
-            @click="viewReportDetail(report)"
-          >
-            <div class="report-header">
-              <span class="report-kp-name">{{ report.kp_name }}</span>
-              <div class="report-score-badge">
-                <span class="score-value">{{ report.total_score }}</span>
-                <span class="score-max">/40</span>
-              </div>
-            </div>
-            
-            <div class="report-dimensions">
-              <div 
-                v-for="dim in report.dimensions" 
-                :key="dim.name" 
-                class="dim-bar"
-              >
-                <span class="dim-name">{{ dim.name }}</span>
-                <div class="dim-progress">
-                  <div 
-                    class="dim-fill" 
-                    :style="{ width: (dim.score / 10 * 100) + '%' }"
-                    :class="getScoreClass(dim.score)"
-                  ></div>
-                </div>
-                <span class="dim-score">{{ dim.score }}</span>
-              </div>
-            </div>
+        <!-- 学习历史：顶部统计 + 时间轴 -->
+        <template v-else>
 
-            <div class="report-footer">
-              <span class="report-material">{{ report.material_name }}</span>
-              <span class="report-date">{{ formatDate(report.created_at) }}</span>
+        <!-- 顶部统计模块 -->
+        <section v-if="userStats" class="history-module">
+          <div class="history-module-head">
+            <div class="history-module-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+            </div>
+            <div>
+              <h2 class="history-module-title">学习历史</h2>
+              <p class="history-module-sub">查看你的学习记录、能力变化与历史报告</p>
             </div>
           </div>
-        </div>
+          <div class="history-stat-grid">
+            <div class="history-stat-card">
+              <div class="history-stat-label">学习次数</div>
+              <div class="history-stat-value">{{ userStats.total_sessions }}</div>
+              <div class="history-stat-foot">累计学习</div>
+            </div>
+            <div class="history-stat-card">
+              <div class="history-stat-label">平均得分</div>
+              <div class="history-stat-value">{{ userStats.avg_total_score }}</div>
+              <div class="history-stat-foot">满分 40</div>
+            </div>
+            <div class="history-stat-card">
+              <div class="history-stat-label">已学习知识点</div>
+              <div class="history-stat-value">{{ userStats.total_kps_learned }}</div>
+              <div class="history-stat-foot">已接触</div>
+            </div>
+            <div class="history-stat-card">
+              <div class="history-stat-label">学习记录</div>
+              <div class="history-stat-value">{{ historyCards.length }}</div>
+              <div class="history-stat-foot">历史记录</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- 学习时间轴 -->
+        <section class="history-timeline-section">
+          <div class="history-timeline-head">
+            <h3 class="history-timeline-title">学习时间轴</h3>
+            <span class="history-timeline-count">共 {{ historyCards.length }} 条记录</span>
+          </div>
+
+          <div class="history-timeline">
+            <div
+              v-for="card in historyCards"
+              :key="card.key"
+              class="history-timeline-item"
+              :class="historyTierClass(card.total_score)"
+            >
+              <div class="history-timeline-date">
+                <span class="ht-cal-month">{{ timelineMonth(card.created_at) }}</span>
+                <span class="ht-cal-day">{{ timelineDay(card.created_at) }}</span>
+              </div>
+              <div class="history-timeline-dot"></div>
+
+              <div class="history-course-card">
+                <!-- 卡片头部 -->
+                <div class="history-course-head">
+                  <div class="history-course-title-wrap">
+                    <div class="history-course-icon" :class="historyIconClass(card.total_score)">
+                      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+                        <path d="M6 12v5c3 3 9 3 12 0v-5" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div class="history-course-title-row">
+                        <h4 class="history-course-name">{{ card.kp_name }}</h4>
+                        <span class="history-badge" :class="historyBadgeClass(card.total_score)">
+                          {{ historyBadgeText(card.total_score) }}
+                        </span>
+                      </div>
+                      <p class="history-course-meta">{{ card.material_name || '当前教材' }} · {{ formatDate(card.created_at) }}</p>
+                    </div>
+                  </div>
+
+                  <div v-if="card.total_score !== null" class="history-course-score">
+                    <span class="history-score-label">得分</span>
+                    <span class="history-score-num">{{ card.total_score }}</span>
+                    <span class="history-score-total">/40</span>
+                  </div>
+                  <div v-else class="history-course-score history-course-score--none">
+                    <span>暂无评分</span>
+                  </div>
+                </div>
+
+                <!-- 能力评估：环形进度 -->
+                <div v-if="card.dimensions.length" class="history-ability">
+                  <div class="history-ability-title">能力评估</div>
+                  <div class="history-ability-grid">
+                    <div v-for="dim in card.dimensions" :key="dim.name" class="history-ring-item">
+                      <div class="history-ring">
+                        <svg class="history-ring-svg" viewBox="0 0 80 80">
+                          <circle cx="40" cy="40" r="32" stroke="#eef2ff" stroke-width="8" fill="none"/>
+                          <circle
+                            cx="40" cy="40" r="32"
+                            :stroke="dimColor(dim.score)"
+                            stroke-width="8"
+                            fill="none"
+                            stroke-dasharray="200.96"
+                            :stroke-dashoffset="ringOffset(dim.score)"
+                            stroke-linecap="round"
+                          />
+                        </svg>
+                        <span class="history-ring-score">{{ dim.score }}</span>
+                      </div>
+                      <div class="history-ring-label">{{ dim.name }}</div>
+                    </div>
+                  </div>
+                </div>
+                <div v-else class="history-ability history-ability--empty">
+                  本次学习暂未生成完整能力评估数据，完成学习任务后将自动更新。
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="history-course-actions">
+                  <button
+                    class="history-btn history-btn--ghost"
+                    :disabled="!card.session"
+                    :title="card.session ? '查看历史会话' : '暂无会话记录'"
+                    @click="card.session && viewSessionDetail(card.session)"
+                  >
+                    历史会话
+                  </button>
+                  <button
+                    class="history-btn history-btn--primary"
+                    :disabled="!card.report"
+                    :title="card.report ? '查看学习报告' : '暂无学习报告'"
+                    @click="card.report && viewReportDetail(card.report)"
+                  >
+                    学习报告
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        </template>
       </div>
 
       <!-- 我的教材 Tab -->
@@ -1314,6 +1496,51 @@ export default {
       if (!dateStr) return null
       const d = new Date(dateStr)
       return `上次复习：${d.getMonth() + 1}月${d.getDate()}日`
+    },
+    /* ===== 学习历史：环形进度 / 徽章 / 图标 辅助方法 ===== */
+    // 环形进度偏移量：分数 0-10，周长 200.96
+    ringOffset(score) {
+      const s = Math.max(0, Math.min(10, Number(score) || 0))
+      return (200.96 * (1 - s / 10)).toFixed(2)
+    },
+    // 环形进度颜色：≥8 绿、≥6 琥珀、否则红
+    dimColor(score) {
+      if (score >= 8) return '#22c55e'
+      if (score >= 6) return '#f59e0b'
+      return '#ef4444'
+    },
+    // 时间轴节点状态：success(≥32) / default(有分) / empty(无分)
+    historyTierClass(score) {
+      if (score === null || score === undefined) return 'history-tier-empty'
+      if (score >= 32) return 'history-tier-success'
+      return 'history-tier-default'
+    },
+    // 掌握程度徽章样式
+    historyBadgeClass(score) {
+      if (score === null || score === undefined) return 'history-badge--none'
+      if (score >= 32) return 'history-badge--good'
+      return 'history-badge--weak'
+    },
+    // 掌握程度徽章文案
+    historyBadgeText(score) {
+      if (score === null || score === undefined) return '暂无评估'
+      if (score >= 32) return '掌握良好'
+      return '需巩固'
+    },
+    // 卡片图标状态
+    historyIconClass(score) {
+      if (score === null || score === undefined) return 'history-icon--none'
+      if (score >= 32) return 'history-icon--good'
+      return 'history-icon--weak'
+    },
+    // 时间轴日历框：月份色条 + 大号日数
+    timelineMonth(dateStr) {
+      if (!dateStr) return ''
+      return `${new Date(dateStr).getMonth() + 1}月`
+    },
+    timelineDay(dateStr) {
+      if (!dateStr) return ''
+      return String(new Date(dateStr).getDate())
     }
   }
 }
@@ -1321,7 +1548,8 @@ export default {
 
 <style scoped>
 .profile-page {
-  min-height: 100vh;
+  flex: 1 0 auto;
+  min-height: 100dvh;
   background: #F8FAFC;
   display: flex;
   flex-direction: column;
@@ -2795,5 +3023,381 @@ export default {
 .toast-fade-enter-active,
 .toast-fade-leave-active {
   transition: opacity 200ms ease, transform 200ms ease;
+}
+
+/* ===== 学习历史：顶部统计模块 + 时间轴 ===== */
+.history-module {
+  background: linear-gradient(135deg, #eaf4ff 0%, #d9ecff 100%);
+  border-radius: 15px;
+  padding: 15px 18px;
+  margin-bottom: 20px;
+  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.08);
+}
+.history-module-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 11px;
+}
+.history-module-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.12);
+  flex: none;
+}
+.history-module-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.history-module-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1E293B;
+}
+.history-module-sub {
+  margin: 2px 0 0;
+  color: #64748B;
+  font-size: 11px;
+}
+.history-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+.history-stat-card {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.06);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.history-stat-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 26px rgba(99, 102, 241, 0.12);
+}
+.history-stat-label {
+  color: #64748B;
+  font-size: 10.5px;
+  margin-bottom: 2px;
+}
+.history-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1E293B;
+  line-height: 1.2;
+}
+.history-stat-foot {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: #94A3B8;
+}
+
+/* 时间轴外层 */
+.history-timeline-section { display: block; }
+.history-timeline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 11px;
+}
+.history-timeline-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1E293B;
+}
+.history-timeline-count {
+  font-size: 11px;
+  color: #94A3B8;
+}
+
+/* 时间轴主线 */
+.history-timeline {
+  position: relative;
+  padding-left: 92px;
+}
+.history-timeline::before {
+  content: "";
+  position: absolute;
+  left: 68px;
+  top: 7px;
+  bottom: 7px;
+  width: 2px;
+  background: #2563EB;
+  border-radius: 2px;
+}
+.history-timeline-item {
+  position: relative;
+  padding-bottom: 14px;
+}
+.history-timeline-item:last-child { padding-bottom: 0; }
+/* 时间轴日历框：位于主线左侧 */
+.history-timeline-date {
+  position: absolute;
+  left: -78px;
+  top: 1px;
+  width: 44px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.12);
+  z-index: 2;
+}
+.ht-cal-month {
+  display: block;
+  background: #2563EB;
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 600;
+  text-align: center;
+  padding: 2px 0;
+  line-height: 1.2;
+}
+.ht-cal-day {
+  display: block;
+  color: #1E293B;
+  font-size: 15px;
+  font-weight: 700;
+  text-align: center;
+  padding: 2px 0 4px;
+  line-height: 1.1;
+}
+/* 按掌握程度变换月份色条 */
+.history-tier-success .ht-cal-month { background: #2563EB; }
+.history-tier-empty .ht-cal-month { background: #2563EB; }
+.history-timeline-dot {
+  position: absolute;
+  left: -24px;
+  top: 6px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #2563EB;
+  box-shadow: 0 0 0 2.5px rgba(37, 99, 235, 0.15);
+  transform: translateX(-50%);
+  z-index: 1;
+}
+.history-tier-success .history-timeline-dot {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 2.5px rgba(37, 99, 235, 0.15);
+}
+.history-tier-empty .history-timeline-dot {
+  border-color: #2563EB;
+  box-shadow: 0 0 0 2.5px rgba(37, 99, 235, 0.15);
+}
+
+/* 课程卡片：背景与边框对齐对话内诊断报告预览卡片 */
+.history-course-card {
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 13px;
+  padding: 9px 13px;
+  max-width: 760px;
+  box-shadow: 0px 10px 15px -3px rgba(0, 0, 0, 0.1), 0px 4px 6px -4px rgba(0, 0, 0, 0.1);
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  overflow: hidden;
+}
+.history-course-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0px 16px 26px -6px rgba(37, 99, 235, 0.16), 0px 4px 6px -4px rgba(0, 0, 0, 0.1);
+}
+.history-course-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 9px;
+}
+.history-course-title-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.history-course-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  flex: none;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18);
+}
+.history-course-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.history-icon--weak { background: #2563EB; }
+.history-icon--good { background: #2563EB; }
+.history-icon--none { background: #2563EB; box-shadow: 0 6px 14px rgba(37, 99, 235, 0.18); }
+.history-course-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.history-course-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1E293B;
+}
+.history-badge {
+  font-size: 10.5px;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.history-badge--good { background: #ECFDF5; color: #0F8A5F; }
+.history-badge--weak { background: #EFF6FF; color: #2563EB; }
+.history-badge--none { background: #F1F5F9; color: #64748B; }
+.history-course-meta {
+  margin: 2px 0 0;
+  color: #94A3B8;
+  font-size: 11px;
+}
+
+/* 得分 */
+.history-course-score {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  flex: none;
+}
+.history-score-label {
+  font-size: 11px;
+  color: #94A3B8;
+}
+.history-score-num {
+  font-size: 19px;
+  font-weight: 700;
+  color: #1E293B;
+  line-height: 1;
+}
+.history-score-total {
+  font-size: 11px;
+  color: #94A3B8;
+}
+.history-course-score--none span {
+  font-size: 11px;
+  color: #94A3B8;
+}
+
+/* 能力评估：环形进度 */
+.history-ability {
+  background: #F8FAFC;
+  border-radius: 11px;
+  padding: 9px 11px;
+  margin-bottom: 9px;
+}
+.history-ability-title {
+  font-size: 11px;
+  color: #64748B;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.history-ability-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 9px;
+}
+.history-ring-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+.history-ring {
+  position: relative;
+  width: 50px;
+  height: 50px;
+}
+.history-ring-svg {
+  width: 50px;
+  height: 50px;
+  transform: rotate(-90deg);
+}
+.history-ring-svg circle {
+  transition: stroke-dashoffset 0.8s ease;
+}
+.history-ring-score {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  color: #334155;
+  font-size: 13px;
+}
+.history-ring-label {
+  font-size: 10.5px;
+  color: #64748B;
+  text-align: center;
+}
+.history-ability--empty {
+  color: #94A3B8;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* 操作按钮 */
+.history-course-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.history-btn {
+  transition: all 0.2s ease;
+  border-radius: 8px;
+  padding: 6px 13px;
+  font-size: 11.5px;
+  font-weight: 500;
+  flex: none;
+}
+.history-btn--primary {
+  background: #2563EB;
+  color: #fff;
+}
+.history-btn--primary:hover:not(:disabled) {
+  background: #1D4ED8;
+  box-shadow: 0 8px 20px rgba(37, 99,235, 0.3);
+}
+.history-btn--ghost {
+  background: #F1F5F9;
+  color: #475569;
+}
+.history-btn--ghost:hover:not(:disabled) {
+  background: #E2E8F0;
+}
+.history-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 860px) {
+  .history-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .history-ability-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+  .history-course-head { flex-direction: column; align-items: flex-start; }
+  /* 小屏：隐藏左侧日期列，时间轴回退为左侧细线 */
+  .history-timeline { padding-left: 24px; }
+  .history-timeline::before { left: 7px; }
+  .history-timeline-date { display: none; }
+  .history-timeline-dot { left: -17px; }
+  .history-course-card { max-width: none; }
 }
 </style>

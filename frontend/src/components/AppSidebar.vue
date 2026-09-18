@@ -21,7 +21,7 @@ const navigation = [
   { label: '我的教材', icon: 'book', to: '/upload', paths: ['/upload', '/knowledge'] },
   { label: '知识点学习', icon: 'layers', to: '/select', paths: ['/select', '/study'] },
   { label: '复习计划', icon: 'calendar', to: '/profile?tab=gaps', tab: 'gaps' },
-  { label: '学习报告', icon: 'chart', to: '/profile?tab=reports', tab: 'reports' }
+  { label: '学习历史', icon: 'chart', to: '/profile?tab=reports', tab: 'reports' }
 ]
 
 function active(item) {

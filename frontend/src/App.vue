@@ -24,7 +24,7 @@ const sidebar = ref(null)
 
 <style scoped>
 .app-layout { display: flex; width: 100%; height: 100dvh; background: #fff; }
-.app-workspace { min-width: 0; min-height: 0; flex: 1; height: 100dvh; overflow-y: auto; display: flex; flex-direction: column; }
+.app-workspace { min-width: 0; min-height: 0; flex: 1; height: 100dvh; overflow-y: auto; display: flex; flex-direction: column; background: #F8FAFC; }
 .mobile-nav-trigger { display: none; }
 @media (max-width: 760px) {
   .mobile-nav-trigger { position: sticky; top: 0; z-index: 18; display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 0 17px; color: #245bd4; background: #fff; border-bottom: 1px solid #e9eef6; font-size: 13px; font-weight: 650; text-align: left; }

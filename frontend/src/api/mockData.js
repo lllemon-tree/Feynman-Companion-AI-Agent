@@ -338,10 +338,52 @@ export const MOCK_SESSIONS = {
   msg: 'success',
   data: [
     {
+      session_id: 'ses-20260918-01',
+      kp_name: '递归与分治策略',
+      material_title: '算法设计与分析教材',
+      created_at: '2026-09-18T09:30:00'
+    },
+    {
+      session_id: 'ses-20260916-01',
+      kp_name: 'Dijkstra 算法',
+      material_title: '数据结构教材',
+      created_at: '2026-09-16T14:00:00'
+    },
+    {
+      session_id: 'ses-20260914-01',
+      kp_name: '红黑树',
+      material_title: '数据结构教材',
+      created_at: '2026-09-14T10:00:00'
+    },
+    {
+      session_id: 'ses-20260912-01',
+      kp_name: 'TCP 三次握手',
+      material_title: '计算机网络教材',
+      created_at: '2026-09-12T16:20:00'
+    },
+    {
+      session_id: 'ses-20260910-01',
+      kp_name: '动态规划：背包问题',
+      material_title: '算法设计与分析教材',
+      created_at: '2026-09-10T11:00:00'
+    },
+    {
+      session_id: 'ses-20260907-01',
+      kp_name: '最小生成树',
+      material_title: '数据结构教材',
+      created_at: '2026-09-07T09:15:00'
+    },
+    {
       session_id: 'ses-demo',
       kp_name: 'Dijkstra 算法',
       material_title: '数据结构教材',
       created_at: '2026-07-20T10:30:00'
+    },
+    {
+      session_id: 'ses-20260715-01',
+      kp_name: 'Floyd 算法',
+      material_title: '数据结构教材',
+      created_at: '2026-07-15T15:40:00'
     }
   ]
 }
@@ -492,6 +534,66 @@ export const MOCK_REPORTS = {
   data: {
     items: [
       {
+        report_id: 'rpt-20260916-01',
+        kp_id: 'kp-dijkstra',
+        kp_name: 'Dijkstra 算法',
+        material_name: '数据结构教材',
+        total_score: 35,
+        dimensions: [
+          { name: '理解深度', score: 9 },
+          { name: '表达完整性', score: 9 },
+          { name: '逻辑连贯性', score: 9 },
+          { name: '结构化能力', score: 8 }
+        ],
+        gaps_identified: 0,
+        created_at: '2026-09-16T14:45:00'
+      },
+      {
+        report_id: 'rpt-20260914-01',
+        kp_id: 'kp-rbtree',
+        kp_name: '红黑树',
+        material_name: '数据结构教材',
+        total_score: 22,
+        dimensions: [
+          { name: '理解深度', score: 5 },
+          { name: '表达完整性', score: 6 },
+          { name: '逻辑连贯性', score: 5 },
+          { name: '结构化能力', score: 6 }
+        ],
+        gaps_identified: 3,
+        created_at: '2026-09-14T10:40:00'
+      },
+      {
+        report_id: 'rpt-20260912-01',
+        kp_id: 'kp-tcp',
+        kp_name: 'TCP 三次握手',
+        material_name: '计算机网络教材',
+        total_score: 30,
+        dimensions: [
+          { name: '理解深度', score: 8 },
+          { name: '表达完整性', score: 7 },
+          { name: '逻辑连贯性', score: 8 },
+          { name: '结构化能力', score: 7 }
+        ],
+        gaps_identified: 1,
+        created_at: '2026-09-12T17:05:00'
+      },
+      {
+        report_id: 'rpt-20260907-01',
+        kp_id: 'kp-mst',
+        kp_name: '最小生成树',
+        material_name: '数据结构教材',
+        total_score: 28,
+        dimensions: [
+          { name: '理解深度', score: 7 },
+          { name: '表达完整性', score: 7 },
+          { name: '逻辑连贯性', score: 7 },
+          { name: '结构化能力', score: 7 }
+        ],
+        gaps_identified: 2,
+        created_at: '2026-09-07T10:00:00'
+      },
+      {
         report_id: 'rpt-demo-1',
         kp_id: 'kp-demo',
         kp_name: 'Dijkstra 算法',
@@ -522,7 +624,7 @@ export const MOCK_REPORTS = {
         created_at: '2026-07-27T14:20:00'
       }
     ],
-    total: 2,
+    total: 6,
     page: 1,
     page_size: 20
   }
@@ -629,20 +731,20 @@ export const MOCK_USER_STATS = {
   code: 200,
   msg: 'success',
   data: {
-    total_kps_learned: 12,
-    total_sessions: 18,
+    total_kps_learned: 7,
+    total_sessions: 8,
     avg_total_score: 28.5,
     dimension_avg: {
       '理解深度': 6.8,
       '表达完整性': 7.2,
-      '逻辑连贯性': 7.5,
-      '结构化能力': 7.0
+      '逻辑连贯性': 7.3,
+      '结构化能力': 7.2
     },
     weakest_dimension: '理解深度',
     recent_trend: [
-      { date: '2026-08-02', total_score: 26 },
-      { date: '2026-08-03', total_score: 30 },
-      { date: '2026-08-04', total_score: 32 }
+      { date: '2026-09-12', total_score: 30 },
+      { date: '2026-09-14', total_score: 22 },
+      { date: '2026-09-16', total_score: 35 }
     ]
   }
 }
